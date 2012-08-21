@@ -139,6 +139,19 @@
 #include "stream/stream_dvd.h"
 #endif
 
+#ifdef __linux__
+#define MP_MSG_DBGSYNC(args...) \
+do {\
+  struct timeval tv;\
+  gettimeofday(&tv, NULL);\
+  mp_msg(MSGT_AVSYNC, MSGL_DBG2, "[%04d.%03d] ",\
+         (int) tv.tv_sec % 10000, (int) tv.tv_usec / 1000);\
+  mp_msg(MSGT_AVSYNC, MSGL_DBG2, ## args);\
+} while (0)
+#else
+#define MP_MSG_DBGSYNC(args...)
+#endif
+
 int slave_mode;
 int player_idle_mode;
 int quiet;
@@ -2084,6 +2097,19 @@ static void adjust_sync_and_print_status(int between_frames, float timing_error)
                 ++drop_message;
                 mp_msg(MSGT_AVSYNC, MSGL_WARN, MSGTR_SystemTooSlow);
             }
+            //  calibrate for PTS wrap arounds.
+            //  33bit 90kHz  PTS wraps around in 95443.7 secs.
+            if (AV_delay < - MP_PTS_WRAP_THRESHOLD)
+                AV_delay += MP_PTS_WRAP_VALUE;
+            else if (AV_delay > MP_PTS_WRAP_THRESHOLD)
+                AV_delay -= MP_PTS_WRAP_VALUE;
+
+            if (AV_delay > 1.0 || AV_delay < -1.0) {
+                mp_msg(MSGT_AVSYNC, MSGL_V,
+                        "A-V runs off apart too much. \n");
+                AV_delay = (AV_delay > 0) ? 1.0 : -1.0;
+            }
+
             if (AV_delay > 0.5 && correct_pts && mpctx->delay < -audio_delay - 30) {
                 // This case means that we are supposed to stop video for a long
                 // time, even though audio is already ahead.
@@ -2104,20 +2130,24 @@ static void adjust_sync_and_print_status(int between_frames, float timing_error)
                  * was late not because of wrong target time but because the
                  * target time could not be met */
                 x = (AV_delay + timing_error * playback_speed) * 0.1f;
-            if (x < -max_pts_correction)
-                x = -max_pts_correction;
-            else if (x > max_pts_correction)
-                x = max_pts_correction;
             if (default_max_pts_correction >= 0)
                 max_pts_correction = default_max_pts_correction;
             else
                 max_pts_correction = mpctx->sh_video->frametime * 0.10;  // +-10% of time
+            if (x < -max_pts_correction)
+                x = -max_pts_correction;
+            else if (x > max_pts_correction)
+                x = max_pts_correction;
             if (!between_frames) {
                 mpctx->delay += x;
                 c_total      += x;
             }
+
+            MP_MSG_DBGSYNC("adjust  x:%g delay:%g tf:%g\n", \
+                           x, mpctx->delay, mpctx->time_frame);
             if (!quiet)
                 print_status(a_pts - audio_delay, AV_delay, c_total);
+            mp_msg(MSGT_AVSYNC, MSGL_DBG2, "\n");
         }
     } else {
         // No audio:
@@ -2543,10 +2573,18 @@ static double update_video(int *blit_frame)
         frame_time = sh_video->pts - sh_video->last_pts;
         if (!frame_time)
             frame_time = sh_video->frametime;
+        else if (frame_time > 20 * sh_video->frametime) {
+            mp_msg(MSGT_CPLAYER, MSGL_V, "found a pts jump from %g to %g.\n",
+                   sh_video->last_pts, sh_video->pts);
+            frame_time = sh_video->frametime;
+        }
+        mp_msg(MSGT_AVSYNC, MSGL_DBG2, "d:%g pts:%g last:%g ft:%g ",
+                mpctx->delay, sh_video->pts, sh_video->last_pts, frame_time);
         sh_video->last_pts = sh_video->pts;
         advance_timer(frame_time);
         *blit_frame = res > 0;
     }
+    mp_msg(MSGT_AVSYNC, MSGL_DBG2, "bf:%d\n", *blit_frame);
     return frame_time;
 }
 

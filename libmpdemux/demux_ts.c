@@ -238,6 +238,7 @@ typedef struct {
 	pat_t pat;
 	pmt_t *pmt;
 	uint16_t pmt_cnt;
+	double pcr_delta;
 	uint32_t prog;
 	uint32_t vbitrate;
 	int keep_broken;
@@ -1020,6 +1021,7 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 
 	priv->pmt = NULL;
 	priv->pmt_cnt = 0;
+	priv->pcr_delta = 0.0;
 
 	priv->keep_broken = ts_keep_broken;
 	priv->ts.packet_size = packet_size;
@@ -2833,6 +2835,78 @@ static int fill_extradata(mp4_decoder_config_t * mp4_dec, ES_stream_t *tss)
 	return tss->extradata_len;
 }
 
+static void reset_es(ts_priv_t *priv, int pid)
+{
+	ES_stream_t *es;
+
+	if (!priv || pid < 16 || pid >= 8191)
+		return;
+
+	es = priv->ts.pids[pid];
+	if (!es)
+		return;
+
+	es->last_cc = -1;
+	es->is_synced = 0;
+
+	return;
+}
+
+static void reset_on_discon(demuxer_t *demuxer)
+{
+	int i;
+	ts_priv_t *priv = demuxer->priv;
+
+	for (i = 0; i < priv->last_aid && demuxer->a_streams[i]; i++) {
+		sh_audio_t *sh = demuxer->a_streams[i];
+		reset_es(priv, sh->aid);
+	}
+
+	for (i = 0; i < priv->last_vid && demuxer->v_streams[i]; i++) {
+		sh_video_t *sh = demuxer->v_streams[i];
+		reset_es(priv, sh->vid);
+	}
+
+	for (i = 0; i < priv->last_sid && demuxer->s_streams[i]; i++) {
+		sh_sub_t *sh = demuxer->s_streams[i];
+		reset_es(priv, sh->sid);
+	}
+
+	priv->pcr_delta = 0;
+	videobuf_code_len = 0;
+	return;
+}
+
+static int check_discon(demuxer_t *demuxer, double pcr)
+{
+	double old, d;
+	ts_priv_t * priv = (ts_priv_t*) demuxer->priv;
+
+	old = demuxer->reference_clock;
+	d = pcr - old;
+	if (d < - MP_PTS_WRAP_THRESHOLD)
+		d += MP_PTS_WRAP_VALUE;
+	else if (d > MP_PTS_WRAP_THRESHOLD)
+		d -= MP_PTS_WRAP_VALUE;
+	demuxer->reference_clock = pcr;
+
+	if (d <= 0.0)
+		return 1;
+
+	if (priv->pcr_delta == 0.0) {
+		priv->pcr_delta = d;
+		return 0;
+	}
+
+	if (d < priv->pcr_delta * 3 || priv->pcr_delta < 0.5) {
+		priv->pcr_delta = 0.8 * priv->pcr_delta  + 0.2 * d;
+		return 0;
+	}
+
+	mp_msg(MSGT_DEMUX, MSGL_WARN, "PCR jump from %g to %g\n", old, pcr);
+	return 1;
+}
+
 // 0 = EOF or no stream found
 // else = [-] number of bytes written to the packet
 static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet, int probe)
@@ -2959,6 +3033,7 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 					if(pcr_pid == pid)
 					{
 						uint64_t pcr, pcr_ext;
+						double new;
 
 						pcr  = (int64_t)(pcrbuf[0]) << 25;
 						pcr |=  pcrbuf[1]         << 17 ;
@@ -2971,7 +3046,11 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 
 						pcr = pcr * 300 + pcr_ext;
 
-						demuxer->reference_clock = (double)pcr/(double)27000000.0;
+						new = (double)pcr/(double)27000000.0;
+						if (demuxer->reference_clock == MP_NOPTS_VALUE)
+							demuxer->reference_clock = new;
+						else if (check_discon(demuxer, new))
+							reset_on_discon(demuxer);
 					}
 				}
 
@@ -3113,6 +3192,16 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 		if(pid  == 0)
 		{
 			parse_pat(priv, is_start, p, buf_size);
+			if (!probe && priv->prog > 0 && prog_idx_in_pat(priv, priv->prog) < 0)
+			{
+				mp_msg(MSGT_DEMUX, MSGL_INFO, "PAT changed and PROG:%" PRIu16
+				       " disappeared.\n", priv->prog);
+				if (priv->pat.progs) {
+					priv->prog = priv->pat.progs[0].id;
+					priv->pcr_delta = 0.0;
+					mp_msg(MSGT_DEMUX, MSGL_INFO, "switching to the PROG:%" PRIu16 "\n", priv->prog);
+				}
+			}
 			continue;
 		}
 		else if((tss->type == SL_SECTION) && pmt)
@@ -3311,6 +3400,7 @@ static void reset_fifos(demuxer_t *demuxer, int a, int v, int s)
 		priv->fifo[2].offset = 0;
 	}
 	demuxer->reference_clock = MP_NOPTS_VALUE;
+	priv->pcr_delta = 0.0;
 }
 
 

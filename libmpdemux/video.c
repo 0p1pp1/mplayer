@@ -647,7 +647,23 @@ int video_read_frame(sh_video_t* sh_video,float* frame_time_ptr,unsigned char** 
     }
 
     if(video_codec == VIDEO_MPEG12){
-        sh_video->pts+=frame_time;
+        float d;
+
+        if (pts > 0 && sh_video->pts > 0)
+            d = pts - sh_video->pts;
+        else
+            d = 0.0;
+
+        if (d > MP_PTS_WRAP_THRESHOLD)
+            d -= MP_PTS_WRAP_VALUE;
+        else if (d < - MP_PTS_WRAP_THRESHOLD)
+            d += MP_PTS_WRAP_VALUE;
+
+        if (d > 3.0 || d < -3.0) // PTS jump.
+            sh_video->i_pts = 0;
+
+        if (sh_video->pts > 0)
+            sh_video->pts+=frame_time;
         if(picture_coding_type==1)
             d_video->flags |= 1;
         if(picture_coding_type<=2 && sh_video->i_pts){

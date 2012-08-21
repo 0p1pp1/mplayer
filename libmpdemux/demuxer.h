@@ -97,6 +97,8 @@
 
 #define MP_NOPTS_VALUE (-1LL<<63) //both int64_t and double should be able to represent this exactly
 
+#define MP_PTS_WRAP_VALUE ((double)(1LL << 33) / 90000.0)
+#define MP_PTS_WRAP_THRESHOLD (MP_PTS_WRAP_VALUE / 2)
 
 // DEMUXER control commands/answers
 #define DEMUXER_CTRL_NOTIMPL -1
