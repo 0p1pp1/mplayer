@@ -2169,7 +2169,6 @@ static int fill_audio_out_buffers(void)
         playsize = bytes_to_write;
         if (playsize > MAX_OUTBURST)
             playsize = MAX_OUTBURST;
-        bytes_to_write -= playsize;
 
         // Fill buffer if needed:
         current_module = "decode_audio";
@@ -2209,6 +2208,7 @@ static int fill_audio_out_buffers(void)
             memmove(sh_audio->a_out_buffer, &sh_audio->a_out_buffer[playsize],
                     sh_audio->a_out_buffer_len);
             mpctx->delay += playback_speed * playsize / (double)ao_data.bps;
+            bytes_to_write -= playsize;
         } else if ((format_change || audio_eof) && mpctx->audio_out->get_delay() < .04) {
             // Sanity check to avoid hanging in case current ao doesn't output
             // partial chunks and doesn't check for AOPLAY_FINAL_CHUNK
