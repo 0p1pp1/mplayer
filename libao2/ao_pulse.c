@@ -236,7 +236,12 @@ static int init(int rate_hz, int channels, int format, int flags) {
     pa_stream_set_write_callback(stream, stream_request_cb, NULL);
     pa_stream_set_latency_update_callback(stream, stream_latency_update_cb, NULL);
 
-    if (pa_stream_connect_playback(stream, sink, NULL, PA_STREAM_INTERPOLATE_TIMING|PA_STREAM_AUTO_TIMING_UPDATE, NULL, NULL) < 0)
+    // mplayer is surely a legacy client that relys on a "classic"
+    // hardware device fragment-style playback model as described in PA docs,
+    // which requires to have _EARTY_REQUESTS flag set.
+    if (pa_stream_connect_playback(stream, sink, NULL,
+            PA_STREAM_INTERPOLATE_TIMING | PA_STREAM_AUTO_TIMING_UPDATE |
+            PA_STREAM_EARLY_REQUESTS, NULL, NULL) < 0)
         goto unlock_and_fail;
 
     /* Wait until the stream is ready */
