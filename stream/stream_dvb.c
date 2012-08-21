@@ -1057,7 +1057,10 @@ fallback:
 		if (custom_conf)
 		{
 			free(conf_file);
-			conf_file = strdup(custom_conf);
+			if (*custom_conf == '/')
+				conf_file = strdup(custom_conf);
+			else
+				conf_file = get_path(custom_conf);
 		}
 
 		if (type_s > 0)
