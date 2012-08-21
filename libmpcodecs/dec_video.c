@@ -399,7 +399,7 @@ void *decode_video(sh_video_t *sh_video, unsigned char *start, int in_size,
 
     //------------------------ frame decoded. --------------------
 
-    if (mpi && mpi->type == MP_IMGTYPE_INCOMPLETE) {
+    if (!mpi || mpi->type == MP_IMGTYPE_INCOMPLETE) {
 	got_picture = 0;
 	mpi = NULL;
     }
