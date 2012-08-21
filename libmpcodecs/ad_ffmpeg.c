@@ -173,6 +173,17 @@ static int init(sh_audio_t *sh_audio)
    } while (x <= 0 && tries++ < 5);
    if(x>0) sh_audio->a_buffer_len=x;
 
+   // for incorrectly sync'ed AAC streams, set temporal dummy parameters,
+   // to avoid the abort of dec_audio.c::init_audio_codec() (from init_audio()).
+   // those parameters will be properly re-configured later
+   if (tries > 5 && lavc_context->codec_id == CODEC_ID_AAC){
+       lavc_context->channels=2;
+       lavc_context->sample_rate=48000;
+       lavc_context->sample_fmt=AV_SAMPLE_FMT_S16;
+       lavc_context->bit_rate=128000;
+       setup_format(sh_audio, lavc_context);
+   }
+
   sh_audio->i_bps=lavc_context->bit_rate/8;
   if (sh_audio->wf && sh_audio->wf->nAvgBytesPerSec)
       sh_audio->i_bps=sh_audio->wf->nAvgBytesPerSec;

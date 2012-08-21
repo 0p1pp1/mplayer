@@ -488,7 +488,11 @@ static void allocate_parser(AVCodecContext **avctx, AVCodecParserContext **parse
     init_avcodec();
 
     switch (format) {
+    case 0x00FF:
     case 0x1600:
+    case 0x1610:
+    case MKTAG('m', 'p', '4', 'a'):
+    case MKTAG('.', 'A', 'A', 'C'):
     case MKTAG('M', 'P', '4', 'A'):
         codec_id = AV_CODEC_ID_AAC;
         break;
