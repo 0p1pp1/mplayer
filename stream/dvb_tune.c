@@ -39,7 +39,46 @@
 #include "dvb_tune.h"
 #include "mp_msg.h"
 
+#if DVB_API_VERSION >= 5
+const char *dvb_get_sysname(int type)
+{
+  static const char *del_sys[] = {
+    "SYS_UNDEFINED", "SYS_DVBC_ANNEX_AC", "SYS_DVBC_ANNEX_B",
+    "SYS_DVBT", "SYS_DSS", "SYS_DVBS", "SYS_DVBS2", "SYS_DVBH",
+    "SYS_ISDBT", "SYS_ISDBS", "SYS_ISDBC", "SYS_ATSC",
+    "SYS_ATSCMH", "SYS_DMBTH", "SYS_CMMB", "SYS_DAB"
+  };
 
+  if (!(type & TUNER_S2API_BASE))
+    return del_sys[0];
+
+  type -= TUNER_S2API_BASE;
+  if (type > SYS_DAB)
+    return "SYS_UNKNOWN";
+  return del_sys[type];
+}
+
+int dvb_get_tuner_type_s2(int fe_fd)
+{
+  int res;
+  struct dtv_properties tvps;
+  struct dtv_property tvp;
+
+  tvps.num = 1;
+  tvps.props = &tvp;
+  tvp.cmd = DTV_DELIVERY_SYSTEM;
+  tvp.u.data = 0;
+  res = ioctl(fe_fd, FE_GET_PROPERTY, &tvps);
+  if (res == 0 && tvp.result == 0 && tvp.u.data != 0)
+  {
+      mp_msg(MSGT_DEMUX, MSGL_V, "TUNER TYPE SEEMS TO BE %s/S2API\n",
+			 dvb_get_sysname(TUNER_S2API_BASE + tvp.u.data));
+	  return TUNER_S2API_BASE + tvp.u.data;
+  }
+  return 0;
+}
+
+#endif
 
 int dvb_get_tuner_type(int fe_fd)
 {
@@ -422,6 +461,28 @@ static int tune_it(int fd_frontend, int fd_sec, unsigned int freq, unsigned int 
 
   return check_status(fd_frontend, timeout);
 }
+
+
+#if DVB_API_VERSION >= 5
+int dvb_tune_s2(dvb_priv_t *priv, dvb_channel_t *ch, int timeout)
+{
+	int ris;
+
+	mp_msg(MSGT_DEMUX, MSGL_INFO, "dvb_tune, setting S2API props.(freq: %lu)\n",
+			(long unsigned int) ch->freq);
+	ris = ioctl(priv->fe_fd, FE_SET_PROPERTY, &ch->tvps);
+	if (ris != 0) {
+		mp_msg(MSGT_DEMUX, MSGL_ERR, "ERROR tuning channel\n");
+		return -1;
+	}
+
+	ris = check_status(priv->fe_fd, timeout);
+	if(ris != 0)
+		mp_msg(MSGT_DEMUX, MSGL_INFO, "dvb_tune, TUNING FAILED\n");
+
+	return (ris == 0);
+}
+#endif
 
 
 int dvb_tune(dvb_priv_t *priv, int freq, char pol, int srate, int diseqc, int tone,

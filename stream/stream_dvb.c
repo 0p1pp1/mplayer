@@ -49,7 +49,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 #include "libavutil/avstring.h"
 
 #include "dvbin.h"
-
+#include "dvb_tune.h"
 
 #define MAX_CHANNELS 8
 #define CHANNEL_LINE_LEN 256
@@ -113,20 +113,177 @@ const m_option_t dvbin_opts_conf[] = {
 };
 
 
+#if DVB_API_VERSION >= 5
+extern int ts_prog; // see ../cfg-common[-opts].h, ../libmpdemux/demux_ts.c
+extern demuxer_t *mp_get_demuxer(void);
 
+#define S2API_SYMDEF(x) {#x, x}
 
-int dvb_set_ts_filt(int fd, uint16_t pid, dmx_pes_type_t pestype);
-int dvb_demux_stop(int fd);
-int dvb_get_tuner_type(int fd);
-int dvb_open_devices(dvb_priv_t *priv, int n, int fe, int dmx, int demux_cnt);
-int dvb_fix_demuxes(dvb_priv_t *priv, int cnt);
+static const struct symbol_def_s
+{
+  const char *name;
+  const int id;
+} s2api_symbols[] = {
+  S2API_SYMDEF (DTV_UNDEFINED), S2API_SYMDEF (DTV_TUNE),
+      S2API_SYMDEF (DTV_CLEAR), S2API_SYMDEF (DTV_FREQUENCY),
+      S2API_SYMDEF (DTV_MODULATION), S2API_SYMDEF (DTV_BANDWIDTH_HZ),
+      S2API_SYMDEF (DTV_INVERSION), S2API_SYMDEF (DTV_DISEQC_MASTER),
+      S2API_SYMDEF (DTV_SYMBOL_RATE), S2API_SYMDEF (DTV_INNER_FEC),
+      S2API_SYMDEF (DTV_VOLTAGE), S2API_SYMDEF (DTV_TONE),
+      S2API_SYMDEF (DTV_PILOT), S2API_SYMDEF (DTV_ROLLOFF),
+      S2API_SYMDEF (DTV_DISEQC_SLAVE_REPLY),
+      S2API_SYMDEF (DTV_FE_CAPABILITY_COUNT), S2API_SYMDEF (DTV_FE_CAPABILITY),
+      S2API_SYMDEF (DTV_DELIVERY_SYSTEM),
+/*
+      S2API_SYMDEF (DTV_ISDBT_PARTIAL_RECEPTION),
+      S2API_SYMDEF (DTV_ISDBT_SOUNR_BROADCASTING),
+      S2API_SYMDEF (DTV_ISDBT_SB_SUBCHANNEL_ID),
+      S2API_SYMDEF (DTV_ISDBT_SB_SEGMENT_IDX),
+      S2API_SYMDEF (DTV_ISDBT_SB_SEGMENT_COUNT),
+      S2API_SYMDEF (DTV_ISDBT_LAYERA_FEC),
+      S2API_SYMDEF (DTV_ISDBT_LAYERA_MODULATION),
+      S2API_SYMDEF (DTV_ISDBT_LAYERA_SEGMENT_COUNT),
+      S2API_SYMDEF (DTV_ISDBT_LAYERA_TIME_INTERLEAVING),
+      S2API_SYMDEF (DTV_ISDBT_LAYERB_FEC),
+      S2API_SYMDEF (DTV_ISDBT_LAYERB_MODULATION),
+      S2API_SYMDEF (DTV_ISDBT_LAYERB_SEGMENT_COUNT),
+      S2API_SYMDEF (DTV_ISDBT_LAYERB_TIME_INTERLEAVING),
+      S2API_SYMDEF (DTV_ISDBT_LAYERC_FEC),
+      S2API_SYMDEF (DTV_ISDBT_LAYERC_MODULATION),
+      S2API_SYMDEF (DTV_ISDBT_LAYERC_SEGMENT_COUNT),
+      S2API_SYMDEF (DTV_ISDBT_LAYERC_TIME_INTERLEAVING),
+ */
+      S2API_SYMDEF (DTV_API_VERSION),
+      S2API_SYMDEF (DTV_CODE_RATE_HP), S2API_SYMDEF (DTV_CODE_RATE_LP),
+      S2API_SYMDEF (DTV_GUARD_INTERVAL), S2API_SYMDEF (DTV_TRANSMISSION_MODE),
+      S2API_SYMDEF (DTV_HIERARCHY),
+/*
+      S2API_SYMDEF (DTV_ISDBT_LAYER_ENABLED), S2API_SYMDEF (DTV_ISDBS_TS_ID),
+ */
+  {"DTV_ISDBS_TS_ID", 42},
+      S2API_SYMDEF (PILOT_ON), S2API_SYMDEF (PILOT_OFF),
+      S2API_SYMDEF (PILOT_AUTO),
+      S2API_SYMDEF (ROLLOFF_35), S2API_SYMDEF (ROLLOFF_20),
+      S2API_SYMDEF (ROLLOFF_25), S2API_SYMDEF (ROLLOFF_AUTO),
+      S2API_SYMDEF (SYS_UNDEFINED), S2API_SYMDEF (SYS_DVBC_ANNEX_AC),
+      S2API_SYMDEF (SYS_DVBC_ANNEX_B), S2API_SYMDEF (SYS_DVBT),
+      S2API_SYMDEF (SYS_DSS), S2API_SYMDEF (SYS_DVBS),
+      S2API_SYMDEF (SYS_DVBS2), S2API_SYMDEF (SYS_DVBH),
+      S2API_SYMDEF (SYS_ISDBT), S2API_SYMDEF (SYS_ISDBS),
+      S2API_SYMDEF (SYS_ISDBC), S2API_SYMDEF (SYS_ATSC),
+      S2API_SYMDEF (SYS_ATSCMH), S2API_SYMDEF (SYS_DMBTH),
+      S2API_SYMDEF (SYS_CMMB), S2API_SYMDEF (SYS_DAB),
+      S2API_SYMDEF (SEC_VOLTAGE_13), S2API_SYMDEF (SEC_VOLTAGE_18),
+      S2API_SYMDEF (SEC_VOLTAGE_OFF),
+  {NULL, 0}
+};
 
-int dvb_tune(dvb_priv_t *priv, int freq, char pol, int srate, int diseqc, int tone,
-		fe_spectral_inversion_t specInv, fe_modulation_t modulation, fe_guard_interval_t guardInterval,
-		fe_transmit_mode_t TransmissionMode, fe_bandwidth_t bandWidth, fe_code_rate_t HP_CodeRate,
-		fe_code_rate_t LP_CodeRate, fe_hierarchy_t hier, int timeout);
+static int s2api_id (const char *name)
+{
+	const struct symbol_def_s *p;
 
+	if (name == NULL)
+		return 0;
+	if (*name == '\0')
+		return 0;
 
+	for (p = s2api_symbols; p->name != NULL; p++)
+		if (!strcmp(name, p->name))
+			return p->id;
+	return 0;
+}
+
+static void parse_s2api_props(char *txt, dvb_channel_t *ch, int type)
+{
+	char pname[256], val[256];
+	const char *prop_conf = "%255[^|=]=%255[^|=]";
+	char *p, *q, *r;
+	int has_dtv_tune = 0, has_freq = 0;
+	struct dtv_property props[DTV_IOCTL_MAX_MSGS];
+	int i, len, d;
+
+	if (!txt)
+		return;
+
+	p = txt;
+	do {
+		q = strchr(p, '|');
+		if (q != NULL)
+			*q = '\0';
+		if (sscanf(p, prop_conf, pname, val) != 2)
+			goto try_next;
+		if (pname[0] == '\0' || val[0] == '\0')
+			goto try_next;
+
+		props[ch->tvps.num].cmd = s2api_id(pname);
+		if (props[ch->tvps.num].cmd == 0)
+			props[ch->tvps.num].cmd = strtoul(pname, &r, 0);
+		if (props[ch->tvps.num].cmd == 0)
+			goto try_next;
+
+		if (val[0] != '[') {
+			props[ch->tvps.num].u.data = strtoul(val, &r, 0);
+			if (isalpha(*r))
+				props[ch->tvps.num].u.data = s2api_id(val);
+		} else {
+			len = strtoul(val + 1, &r, 0);
+			if (*r != ']' || len > 32)
+				goto try_next;
+			props[ch->tvps.num].u.buffer.len = len;
+			for (i = 0; i < len; i++) {
+				p = r;
+				if (*p == '\0')
+					goto try_next;
+				d = strtoul(++p, &r, 0);
+				if ((*r != ',' && *r != '\0') || d > 255)
+					goto try_next;
+				props[ch->tvps.num].u.buffer.data[i] = d;
+			}
+		}
+		if (props[ch->tvps.num].cmd == DTV_FREQUENCY) {
+			ch->freq = props[ch->tvps.num].u.data;
+			has_freq = 1;
+		} else if (props[ch->tvps.num].cmd == DTV_TUNE)
+			has_dtv_tune = 1;
+		else if (props[ch->tvps.num].cmd == DTV_DELIVERY_SYSTEM &&
+			   props[ch->tvps.num].u.data != type &&
+			   type != SYS_UNDEFINED) {
+			has_freq = 0;    // skip this channel
+			break;
+		}
+		ch->tvps.num++;
+		if (ch->tvps.num >= DTV_IOCTL_MAX_MSGS)
+			break;
+try_next:
+		p = q;
+		p++;
+	} while (q != NULL);
+
+	if (ch->tvps.num == 0 || !has_freq) {
+		ch->freq = 0;
+		ch->tvps.num = 0;
+		ch->tvps.props = NULL;
+		return;
+	}
+	if (!has_dtv_tune) {
+		if (ch->tvps.num == DTV_IOCTL_MAX_MSGS)
+			ch->tvps.num--;
+		props[ch->tvps.num].cmd = DTV_TUNE;
+		props[ch->tvps.num].u.data = 1;
+		ch->tvps.num++;
+	}
+	ch->tvps.props = malloc (ch->tvps.num * sizeof(struct dtv_property));
+	if (ch->tvps.props) {
+		memcpy(ch->tvps.props, props, ch->tvps.num * sizeof(struct dtv_property));
+		ch->pids[0] = 8192;
+		ch->pids_cnt = 1;
+	} else {
+		ch->freq = 0;
+		ch->tvps.num = 0;
+	}
+	return;
+}
+#endif
 
 static dvb_channels_list *dvb_get_channels(char *filename, int type)
 {
@@ -138,10 +295,13 @@ static dvb_channels_list *dvb_get_channels(char *filename, int type)
 	int has8192, has0;
 	dvb_channel_t *ptr, *tmp, chn;
 	char tmp_lcr[256], tmp_hier[256], inv[256], bw[256], cr[256], mod[256], transm[256], gi[256], vpid_str[256], apid_str[256];
+	char dtv_props[256];
 	const char *cbl_conf = "%d:%255[^:]:%d:%255[^:]:%255[^:]:%255[^:]:%255[^:]\n";
 	const char *sat_conf = "%d:%c:%d:%d:%255[^:]:%255[^:]\n";
 	const char *ter_conf = "%d:%255[^:]:%255[^:]:%255[^:]:%255[^:]:%255[^:]:%255[^:]:%255[^:]:%255[^:]:%255[^:]:%255[^:]\n";
 	const char *atsc_conf = "%d:%255[^:]:%255[^:]:%255[^:]\n";
+	const char *s2api_conf = "%255[^:]:%i\n";
+	int alloced_num;
 
 	mp_msg(MSGT_DEMUX, MSGL_V, "CONFIG_READ FILE: %s, type: %d\n", filename, type);
 	if((f=fopen(filename, "r"))==NULL)
@@ -154,13 +314,16 @@ static dvb_channels_list *dvb_get_channels(char *filename, int type)
 	if(list == NULL)
 	{
 		fclose(f);
-		mp_msg(MSGT_DEMUX, MSGL_V, "DVB_GET_CHANNELS: couldn't malloc enough memory\n");
+		mp_msg(MSGT_DEMUX, MSGL_ERR, "DVB_GET_CHANNELS: couldn't malloc enough memory\n");
 		return NULL;
 	}
 
 	ptr = &chn;
 	list->NUM_CHANNELS = 0;
-	list->channels = NULL;
+	alloced_num = 32;
+	list->channels = malloc(sizeof(dvb_channel_t) * alloced_num);
+	if (!list->channels)
+		goto done;
 	while(! feof(f))
 	{
 		if( fgets(line, CHANNEL_LINE_LEN, f) == NULL )
@@ -186,6 +349,9 @@ static dvb_channels_list *dvb_get_channels(char *filename, int type)
 		apid_str[0] = vpid_str[0] = 0;
 		ptr->pids_cnt = 0;
 		ptr->freq = 0;
+#if DVB_API_VERSION >= 5
+		ptr->tvps.num = 0;
+#endif
 		if(type == TUNER_TER)
 		{
 			fields = sscanf(&line[k], ter_conf,
@@ -212,6 +378,20 @@ static dvb_channels_list *dvb_get_channels(char *filename, int type)
 			mp_msg(MSGT_DEMUX, MSGL_V,
 				"ATSC, NUM: %d, NUM_FIELDS: %d, NAME: %s, FREQ: %d\n",
 				list->NUM_CHANNELS, fields, ptr->name, ptr->freq);
+		}
+#endif
+#if DTV_API_VERSION >= 5
+		else if((type & TUNER_S2API_BASE) &&
+			(type - TUNER_S2API_BASE  <= SYS_DAB))
+		{
+			fields = sscanf(&line[k], s2api_conf,
+				dtv_props, &ptr->progid);
+			mp_msg(MSGT_DEMUX, MSGL_V, "parse S2API: %s. prog:%d\n", dtv_props, ptr->progid);
+			parse_s2api_props(dtv_props, ptr, type - TUNER_S2API_BASE);
+			if (ptr->freq)
+				mp_msg(MSGT_DEMUX, MSGL_V,
+					"S2API, NUM: %d, NUM_FIELDS: %d, NAME: %s, PROPS: %s\n",
+					list->NUM_CHANNELS, fields, ptr->name, dtv_props);
 		}
 #endif
 		else //SATELLITE
@@ -256,7 +436,7 @@ static dvb_channels_list *dvb_get_channels(char *filename, int type)
 			}
 		}
 
-		if((fields < 2) || (ptr->pids_cnt <= 0) || (ptr->freq == 0) || (strlen(ptr->name) == 0))
+		if((fields < 2) || (ptr->pids_cnt < 0) || (ptr->freq == 0) || (strlen(ptr->name) == 0))
 			continue;
 
 		has8192 = has0 = 0;
@@ -396,11 +576,15 @@ static dvb_channels_list *dvb_get_channels(char *filename, int type)
 			else	ptr->hier = HIERARCHY_NONE;
 		}
 
-		tmp = realloc(list->channels, sizeof(dvb_channel_t) * (list->NUM_CHANNELS + 1));
-		if(tmp == NULL)
-			break;
+		if(list->NUM_CHANNELS + 1 >= alloced_num) {
+			alloced_num += 32;
+			tmp = realloc(list->channels,
+				     sizeof(dvb_channel_t) * alloced_num);
+			if(tmp == NULL)
+				break;
 
-		list->channels = tmp;
+			list->channels = tmp;
+		}
 		memcpy(&(list->channels[list->NUM_CHANNELS]), ptr, sizeof(dvb_channel_t));
 		list->NUM_CHANNELS++;
 		if(sizeof(dvb_channel_t) * list->NUM_CHANNELS >= 1024*1024)
@@ -410,6 +594,7 @@ static dvb_channels_list *dvb_get_channels(char *filename, int type)
 		}
 	}
 
+done:
 	fclose(f);
 	if(list->NUM_CHANNELS == 0)
 	{
@@ -434,7 +619,13 @@ void dvb_free_config(dvb_config_t *config)
 		if(config->cards[i].list->channels)
 		{
 			for(j=0; j<config->cards[i].list->NUM_CHANNELS; j++)
+			{
 				free(config->cards[i].list->channels[j].name);
+#if DVB_API_VERSION >= 5
+				if(config->cards[i].list->channels[j].tvps.num)
+					free(config->cards[i].list->channels[j].tvps.props);
+#endif
+			}
 			free(config->cards[i].list->channels);
 		}
 		free(config->cards[i].list);
@@ -555,12 +746,29 @@ int dvb_set_channel(stream_t *stream, int card, int n)
 	stream->eof = 0;
 
 	if(channel->freq != priv->last_freq)
+	{
+#if DVB_API_VERSION >= 5
+		if (priv->config->cards[card].type & TUNER_S2API_BASE)
+		{
+			if (!dvb_tune_s2(priv, channel, priv->timeout))
+				return 0;
+		} else
+#endif
 		if (! dvb_tune(priv, channel->freq, channel->pol, channel->srate, channel->diseqc, channel->tone,
 			channel->inv, channel->mod, channel->gi, channel->trans, channel->bw, channel->cr, channel->cr_lp, channel->hier, priv->timeout))
 			return 0;
+	}
 
 	priv->last_freq = channel->freq;
 	priv->is_on = 1;
+
+#if DVB_API_VERSION >= 5
+	if (priv->config->cards[card].type & TUNER_S2API_BASE)
+	{
+		// set program-id property of demuxer.
+		ts_prog = channel->progid;
+	}
+#endif
 
 	//sets demux filters and restart the stream
 	for(i = 0; i < channel->pids_cnt; i++)
@@ -693,7 +901,7 @@ static int dvb_open(stream_t *stream, int mode, void *opts, int *file_format)
 
 	priv = (dvb_priv_t *)stream->priv;
 	priv->fe_fd = priv->sec_fd = priv->dvr_fd = -1;
-	priv->config = dvb_get_config();
+	priv->config = dvb_get_config(p->file);
 	if(priv->config == NULL)
 	{
 		free(priv);
@@ -761,7 +969,7 @@ static int dvb_open(stream_t *stream, int mode, void *opts, int *file_format)
 	return STREAM_OK;
 }
 
-dvb_config_t *dvb_get_config(void)
+dvb_config_t *dvb_get_config(char *custom_conf)
 {
 	int i, fd, type, size;
 	char filename[30], *conf_file, *name;
@@ -769,6 +977,7 @@ dvb_config_t *dvb_get_config(void)
 	dvb_card_config_t *cards = NULL, *tmp;
 	dvb_config_t *conf = NULL;
 	int j;
+  int type_s = 0;
 
 
 	conf = malloc(sizeof(dvb_config_t));
@@ -790,8 +999,25 @@ dvb_config_t *dvb_get_config(void)
 			continue;
 		}
 
+#if DVB_API_VERSION >= 5
+		type_s = dvb_get_tuner_type_s2(fd);
+#endif
 		type = dvb_get_tuner_type(fd);
 		close(fd);
+#if DVB_API_VERSION >= 5
+#define FORCE_S2API 1
+#if FORCE_S2API
+		if (type_s == 0 && type == TUNER_TER)
+			type_s = TUNER_S2API_BASE + SYS_ISDBT;
+		else if (type_s == 0 && type == TUNER_SAT)
+			type_s = TUNER_S2API_BASE + SYS_ISDBS;
+#endif
+fallback:
+		if (type_s !=0)
+			conf_file = get_path("channels.conf.s2");
+		else
+		{
+#endif
 		if(type != TUNER_SAT && type != TUNER_TER && type != TUNER_CBL && type != TUNER_ATSC)
 		{
 			mp_msg(MSGT_DEMUX, MSGL_V, "DVB_CONFIG, can't detect tuner type of card %d, skipping\n", i);
@@ -815,6 +1041,9 @@ dvb_config_t *dvb_get_config(void)
 				break;
 		}
 
+#if DVB_API_VERSION >= 5
+		} // if (type != 0) else {}
+#endif
 		if((access(conf_file, F_OK | R_OK) != 0))
 		{
 			free(conf_file);
@@ -825,9 +1054,25 @@ dvb_config_t *dvb_get_config(void)
 				conf_file = strdup(MPLAYER_CONFDIR "/channels.conf");
 			}
 		}
+		if (custom_conf)
+		{
+			free(conf_file);
+			conf_file = strdup(custom_conf);
+		}
 
-		list = dvb_get_channels(conf_file, type);
+		if (type_s > 0)
+			list = dvb_get_channels(conf_file, type_s);
+		else
+			list = dvb_get_channels(conf_file, type);
 		free(conf_file);
+#if DVB_API_VERSION >= 5
+		if (list == NULL && type_s > TUNER_S2API_BASE) {
+			mp_msg(MSGT_DEMUX, MSGL_INFO, "S2API failed. falling back to the old API.\n");
+			type_s = 0;
+			goto fallback;
+		}
+		else
+#endif
 		if(list == NULL)
 			continue;
 
@@ -854,12 +1099,20 @@ dvb_config_t *dvb_get_config(void)
 		conf->cards[conf->count].dmxno = j; // FIXME: expand with dmxno?
 		conf->cards[conf->count].list = list;
 		conf->cards[conf->count].type = type;
-		snprintf(name, 20, "DVB-%c card n. %d", type==TUNER_TER ? 'T' : (type==TUNER_CBL ? 'C' : 'S'), conf->count+1);
+#if DVB_API_VERSION >= 5
+		if (type_s > TUNER_S2API_BASE) {
+			conf->cards[conf->count].type = type_s;
+			snprintf(name, 32, "%s(S2API) card #. %d",
+				dvb_get_sysname(type), conf->count);
+		} else
+#endif
+		snprintf(name, 32, "DVB-%c card n. %d", type==TUNER_TER ? 'T' : (type==TUNER_CBL ? 'C' : 'S'), conf->count);
 		conf->cards[conf->count].name = name;
 		conf->count++;
     }
 	}
 
+	mp_msg(MSGT_DEMUX, MSGL_V, "%d cards found.\n", conf->count);
 	if(conf->count == 0)
 	{
 		free(conf);

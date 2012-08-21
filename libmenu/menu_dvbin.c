@@ -273,7 +273,7 @@ static void close_menu(menu_t* menu)
 
 static int open_dvb_sel(menu_t* menu, char* args)
 {
-	mpriv->config = dvb_get_config();
+	mpriv->config = dvb_get_config(mpriv->file);
 	if(mpriv->config == NULL)
 		return 0;
 

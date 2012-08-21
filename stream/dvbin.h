@@ -54,6 +54,9 @@ typedef struct {
 	fe_guard_interval_t 		gi;
 	fe_code_rate_t 			cr, cr_lp;
 	fe_hierarchy_t			hier;
+#if DVB_API_VERSION >= 5
+	struct dtv_properties	tvps;
+#endif
 } dvb_channel_t;
 
 typedef struct {
@@ -98,10 +101,11 @@ typedef struct {
 #define TUNER_TER	2
 #define TUNER_CBL	3
 #define TUNER_ATSC	4
+#define TUNER_S2API_BASE 256
 
 int dvb_step_channel(stream_t *, int);
 int dvb_set_channel(stream_t *, int, int);
-dvb_config_t *dvb_get_config(void);
+dvb_config_t *dvb_get_config(char *);
 void dvb_free_config(dvb_config_t *config);
 
 #endif /* MPLAYER_DVBIN_H */
