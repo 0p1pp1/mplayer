@@ -278,14 +278,38 @@ static void parse_cfgfiles( m_config_t* conf )
 
 //---------------------------------------------------------------------------
 
+// Needed for reconfiguring audio stream
+static struct {
+    int new_srate;
+    muxer_stream_t *mux_a;
+    audio_encoder_t *aencoder;
+} reconf_data;
+
 static int dec_audio(sh_audio_t *sh_audio,unsigned char* buffer,int total){
     int size=0;
     int at_eof=0;
+    int res=0;
     while(size<total && !at_eof){
 	int len=total-size;
 		if(len>MAX_OUTBURST) len=MAX_OUTBURST;
-		if (mp_decode_audio(sh_audio, len) < 0)
+		res = mp_decode_audio(sh_audio, len);
+		if (res < 0 && res != -2)
                     at_eof = 1;
+		if (res == -2) {
+			int out_srate = reconf_data.mux_a->wf->nSamplesPerSec;
+			int out_channels = reconf_data.mux_a->wf->nChannels;
+			int out_format = reconf_data.aencoder->input_format;
+			if (!init_audio_filters(sh_audio, reconf_data.new_srate,
+						&out_srate, &out_channels,
+						&out_format)) {
+				mp_msg(MSGT_CPLAYER, MSGL_FATAL,
+				       MSGTR_NoMatchingFilter);
+				mencoder_exit(1, NULL);
+			}
+			reconf_data.mux_a->wf->nSamplesPerSec = out_srate;
+			reconf_data.mux_a->wf->nChannels = out_channels;
+			at_eof = 0;
+		}
 		if(len>sh_audio->a_out_buffer_len) len=sh_audio->a_out_buffer_len;
 		fast_memcpy(buffer+size,sh_audio->a_out_buffer,len);
 		sh_audio->a_out_buffer_len-=len; size+=len;
@@ -1091,6 +1115,11 @@ if(mux_a->codec != ACODEC_COPY) {
     ao_data.channels = aparams.channels;
     ao_data.samplerate = aparams.sample_rate;
 }
+
+reconf_data.mux_a = mux_a;
+reconf_data.new_srate = new_srate;
+reconf_data.aencoder = aencoder;
+
 switch(mux_a->codec){
 case ACODEC_COPY:
     if (playback_speed != 1.0) mp_msg(MSGT_CPLAYER, MSGL_WARN, MSGTR_NoSpeedWithFrameCopy);
