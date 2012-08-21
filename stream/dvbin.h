@@ -67,6 +67,8 @@ typedef struct {
 	dvb_channels_list *list;
 	char *name;
 	int devno;
+	int feno;
+	int dmxno;
 } dvb_card_config_t;
 
 typedef struct {

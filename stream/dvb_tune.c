@@ -80,14 +80,14 @@ int dvb_get_tuner_type(int fe_fd)
 
 }
 
-int dvb_open_devices(dvb_priv_t *priv, int n, int demux_cnt)
+int dvb_open_devices(dvb_priv_t *priv, int n, int fe, int dmx, int demux_cnt)
 {
 	int i;
 	char frontend_dev[32], dvr_dev[32], demux_dev[32];
 
-	sprintf(frontend_dev, "/dev/dvb/adapter%d/frontend0", n);
-	sprintf(dvr_dev, "/dev/dvb/adapter%d/dvr0", n);
-	sprintf(demux_dev, "/dev/dvb/adapter%d/demux0", n);
+	sprintf(frontend_dev, "/dev/dvb/adapter%d/frontend%d", n, fe);
+	sprintf(dvr_dev, "/dev/dvb/adapter%d/dvr%d", n, dmx);
+	sprintf(demux_dev, "/dev/dvb/adapter%d/demux%d", n, dmx);
 	priv->fe_fd = open(frontend_dev, O_RDWR | O_NONBLOCK);
 	if(priv->fe_fd < 0)
 	{
@@ -325,7 +325,7 @@ static int tune_it(int fd_frontend, int fd_sec, unsigned int freq, unsigned int 
 	fe_transmit_mode_t TransmissionMode, fe_guard_interval_t guardInterval, fe_bandwidth_t bandwidth,
 	fe_code_rate_t LP_CodeRate, fe_hierarchy_t hier, int timeout)
 {
-  int res, hi_lo, dfd;
+  int res, hi_lo=0, dfd;
   struct dvb_frontend_parameters feparams;
   struct dvb_frontend_info fe_info;
 

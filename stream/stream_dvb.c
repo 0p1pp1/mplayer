@@ -65,23 +65,30 @@ static struct stream_priv_s
 	int card;
 	int timeout;
 	char *file;
+	int fe;
+	int dmx;
 }
 stream_defaults =
 {
-	"", 1, 30, NULL
+	"", 0, 30, NULL, 0, -1
 };
 
 #define ST_OFF(f) M_ST_OFF(struct stream_priv_s, f)
+#define MAX_CARDS 16
+#define MAX_FE 4
+#define MAX_DMX 4
 
 /// URL definition
 static const m_option_t stream_params[] = {
 	{"prog", ST_OFF(prog), CONF_TYPE_STRING, 0, 0 ,0, NULL},
-	{"card", ST_OFF(card), CONF_TYPE_INT, M_OPT_RANGE, 1, 4, NULL},
+	{"card", ST_OFF(card), CONF_TYPE_INT, M_OPT_RANGE, 0, MAX_CARDS - 1, NULL},
 	{"timeout",ST_OFF(timeout),  CONF_TYPE_INT, M_OPT_RANGE, 1, 240, NULL},
 	{"file", ST_OFF(file), CONF_TYPE_STRING, 0, 0 ,0, NULL},
+	{"fe", ST_OFF(fe), CONF_TYPE_INT, M_OPT_RANGE, 0, MAX_FE - 1, NULL},
+	{"dmx", ST_OFF(dmx), CONF_TYPE_INT, M_OPT_RANGE, -1, MAX_DMX - 1, NULL},
 
 	{"hostname", 	ST_OFF(prog), CONF_TYPE_STRING, 0, 0, 0, NULL },
-	{"username", 	ST_OFF(card), CONF_TYPE_INT, M_OPT_RANGE, 1, 4, NULL},
+	{"username", 	ST_OFF(card), CONF_TYPE_INT, M_OPT_RANGE, 0, MAX_CARDS - 1, NULL},
 	{NULL, NULL, 0, 0, 0, 0, NULL}
 };
 
@@ -96,9 +103,11 @@ static const struct m_struct_st stream_opts = {
 
 const m_option_t dvbin_opts_conf[] = {
 	{"prog", &stream_defaults.prog, CONF_TYPE_STRING, 0, 0 ,0, NULL},
-	{"card", &stream_defaults.card, CONF_TYPE_INT, M_OPT_RANGE, 1, 4, NULL},
+	{"card", &stream_defaults.card, CONF_TYPE_INT, M_OPT_RANGE, 0, MAX_CARDS - 1, NULL},
 	{"timeout",  &stream_defaults.timeout,  CONF_TYPE_INT, M_OPT_RANGE, 1, 240, NULL},
 	{"file", &stream_defaults.file, CONF_TYPE_STRING, 0, 0 ,0, NULL},
+	{"fe", &stream_defaults.fe, CONF_TYPE_INT, M_OPT_RANGE, 0, MAX_FE - 1, NULL},
+	{"dmx", &stream_defaults.dmx, CONF_TYPE_INT, M_OPT_RANGE, -1, MAX_DMX - 1, NULL},
 
 	{NULL, NULL, 0, 0, 0, 0, NULL}
 };
@@ -109,7 +118,7 @@ const m_option_t dvbin_opts_conf[] = {
 int dvb_set_ts_filt(int fd, uint16_t pid, dmx_pes_type_t pestype);
 int dvb_demux_stop(int fd);
 int dvb_get_tuner_type(int fd);
-int dvb_open_devices(dvb_priv_t *priv, int n, int demux_cnt);
+int dvb_open_devices(dvb_priv_t *priv, int n, int fe, int dmx, int demux_cnt);
 int dvb_fix_demuxes(dvb_priv_t *priv, int cnt);
 
 int dvb_tune(dvb_priv_t *priv, int freq, char pol, int srate, int diseqc, int tone,
@@ -483,6 +492,7 @@ int dvb_set_channel(stream_t *stream, int card, int n)
 	char buf[4096];
 	dvb_config_t *conf = (dvb_config_t *) priv->config;
 	int devno;
+	int feno, dmxno;
 	int i;
 
 	if((card < 0) || (card > conf->count))
@@ -492,6 +502,8 @@ int dvb_set_channel(stream_t *stream, int card, int n)
 	}
 
 	devno = conf->cards[card].devno;
+	feno = conf->cards[card].feno;
+	dmxno = conf->cards[card].dmxno;
 	new_list = conf->cards[card].list;
 	if((n > new_list->NUM_CHANNELS) || (n < 0))
 	{
@@ -510,7 +522,7 @@ int dvb_set_channel(stream_t *stream, int card, int n)
 		if(priv->card != card)
 		{
 			dvbin_close(stream);
-			if(! dvb_open_devices(priv, devno, channel->pids_cnt))
+			if(! dvb_open_devices(priv, devno, feno, dmxno, channel->pids_cnt))
 			{
 				mp_msg(MSGT_DEMUX, MSGL_ERR, "DVB_SET_CHANNEL, COULDN'T OPEN DEVICES OF CARD: %d, EXIT\n", card);
 				return 0;
@@ -524,7 +536,7 @@ int dvb_set_channel(stream_t *stream, int card, int n)
 	}
 	else
 	{
-		if(! dvb_open_devices(priv, devno, channel->pids_cnt))
+		if(! dvb_open_devices(priv, devno, feno, dmxno, channel->pids_cnt))
 		{
 			mp_msg(MSGT_DEMUX, MSGL_ERR, "DVB_SET_CHANNEL2, COULDN'T OPEN DEVICES OF CARD: %d, EXIT\n", card);
 			return 0;
@@ -676,6 +688,9 @@ static int dvb_open(stream_t *stream, int mode, void *opts, int *file_format)
 	if(stream->priv ==  NULL)
 		return STREAM_ERROR;
 
+	if(p->dmx == -1)
+		p->dmx = p->fe;
+
 	priv = (dvb_priv_t *)stream->priv;
 	priv->fe_fd = priv->sec_fd = priv->dvr_fd = -1;
 	priv->config = dvb_get_config();
@@ -689,7 +704,9 @@ static int dvb_open(stream_t *stream, int mode, void *opts, int *file_format)
 	priv->card = -1;
 	for(i=0; i<priv->config->count; i++)
 	{
-		if(priv->config->cards[i].devno+1 == p->card)
+		if(priv->config->cards[i].devno == p->card &&
+		   priv->config->cards[i].feno == p->fe &&
+		   priv->config->cards[i].dmxno == p->dmx)
 		{
 			priv->card = i;
 			break;
@@ -717,7 +734,7 @@ static int dvb_open(stream_t *stream, int mode, void *opts, int *file_format)
 	priv->tuner_type = tuner_type;
 
 	mp_msg(MSGT_DEMUX, MSGL_V, "OPEN_DVB: prog=%s, card=%d, type=%d\n",
-		p->prog, priv->card+1, priv->tuner_type);
+		p->prog, priv->card, priv->tuner_type);
 
 	priv->list = priv->config->cards[priv->card].list;
 
@@ -744,7 +761,6 @@ static int dvb_open(stream_t *stream, int mode, void *opts, int *file_format)
 	return STREAM_OK;
 }
 
-#define MAX_CARDS 4
 dvb_config_t *dvb_get_config(void)
 {
 	int i, fd, type, size;
@@ -752,6 +768,7 @@ dvb_config_t *dvb_get_config(void)
 	dvb_channels_list *list;
 	dvb_card_config_t *cards = NULL, *tmp;
 	dvb_config_t *conf = NULL;
+	int j;
 
 
 	conf = malloc(sizeof(dvb_config_t));
@@ -763,7 +780,9 @@ dvb_config_t *dvb_get_config(void)
 	conf->cards = NULL;
 	for(i=0; i<MAX_CARDS; i++)
 	{
-		snprintf(filename, sizeof(filename), "/dev/dvb/adapter%d/frontend0", i);
+		for(j=0; j<MAX_FE; j++)
+		{
+		snprintf(filename, sizeof(filename), "/dev/dvb/adapter%d/frontend%d", i, j);
 		fd = open(filename, O_RDONLY|O_NONBLOCK);
 		if(fd < 0)
 		{
@@ -822,20 +841,23 @@ dvb_config_t *dvb_get_config(void)
 		}
 		cards = tmp;
 
-		name = malloc(20);
+		name = malloc(32);
 		if(name==NULL)
 		{
-			fprintf(stderr, "DVB_CONFIG, can't realloc 20 bytes, skipping\n");
+			fprintf(stderr, "DVB_CONFIG, can't realloc 32 bytes, skipping\n");
 			continue;
 		}
 
 		conf->cards = cards;
 		conf->cards[conf->count].devno = i;
+		conf->cards[conf->count].feno = j;
+		conf->cards[conf->count].dmxno = j; // FIXME: expand with dmxno?
 		conf->cards[conf->count].list = list;
 		conf->cards[conf->count].type = type;
 		snprintf(name, 20, "DVB-%c card n. %d", type==TUNER_TER ? 'T' : (type==TUNER_CBL ? 'C' : 'S'), conf->count+1);
 		conf->cards[conf->count].name = name;
 		conf->count++;
+    }
 	}
 
 	if(conf->count == 0)

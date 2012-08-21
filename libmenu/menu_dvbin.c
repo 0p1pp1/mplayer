@@ -226,7 +226,7 @@ static void read_cmd(menu_t* menu, int cmd)
 			if(dvbp != NULL)
 				sprintf(cmd_name, "dvb_set_channel %d %d", elem->num, mpriv->card);
 			else
-				sprintf(cmd_name, "loadfile 'dvb://%d@%s'", mpriv->card+1, elem->p.txt);
+				sprintf(cmd_name, "loadfile 'dvb://%d@%s'", mpriv->card, elem->p.txt);
 
 			c = mp_input_parse_cmd(cmd_name);
 			free(cmd_name);

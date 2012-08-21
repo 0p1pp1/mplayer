@@ -22,7 +22,7 @@
 #include "dvbin.h"
 
 int dvb_get_tuner_type(int fe_fd);
-int dvb_open_devices(dvb_priv_t *priv, int n, int demux_cnt);
+int dvb_open_devices(dvb_priv_t *priv, int n, int fe, int dmx, int demux_cnt);
 int dvb_fix_demuxes(dvb_priv_t *priv, int cnt);
 int dvb_set_ts_filt(int fd, uint16_t pid, dmx_pes_type_t pestype);
 int dvb_demux_stop(int fd);

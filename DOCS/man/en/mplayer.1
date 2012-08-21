@@ -90,7 +90,7 @@ pvr://
 .
 .br
 .B mplayer
-dvb://[card_number@]channel
+dvb://[card_number@]channel[?dvbin_options]
 [options]
 .
 .br
@@ -1653,11 +1653,19 @@ the default ones:
 .sp 1
 .PD 0
 .RSs
-.IPs card=<1\-4>
-Specifies using card number 1\-4 (default: 1).
+.IPs prog=<channel_name>
+Specifies the channel name to tune.
+Default is the first one in the channels list.
+.IPs card=<0\-15>
+Specifies using card number 0\-15 (default: 0).
+.IPs fe=<0\-3>
+Specifies using frontend number 0\-3 (default: 0)
+.IPs dmx=<-1\-3>
+Specifies using demuxer number 0\-3,
+or -1 to use the same number with \-fe (default: -1).
 .IPs file=<filename>
 Instructs MPlayer to read the channels list from <filename>.
-Default is ~/.mplayer/\:channels.conf.{sat,ter,cbl,atsc} (based on your card type)
+Default is ~/.mplayer/\:channels.conf.{s2,sat,ter,cbl,atsc} (based on your card type)
 or ~/.mplayer/\:channels.conf as a last resort.
 .IPs timeout=<1\-240>
 Maximum number of seconds to wait when trying to tune a
