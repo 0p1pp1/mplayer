@@ -153,6 +153,7 @@ void resync_video_stream(sh_video_t *sh_video)
 {
     sh_video->timer            = 0;
     sh_video->next_frame_time  = 0;
+    sh_video->i_pts = 0;
     sh_video->num_buffered_pts = 0;
     sh_video->last_pts         = MP_NOPTS_VALUE;
     if (mpvdec)
