@@ -2926,22 +2926,8 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 			is_start = 0;	//queued to the packet data
 		}
 
-		if(is_start)
-			tss->is_synced = 1;
-
-		if((!is_start && !tss->is_synced) || ((pid > 1) && (pid < 16)) || (pid == 8191))		//invalid pid
-		{
-			stream_skip(stream, buf_size-1+junk);
-			continue;
-		}
-
 
 		afc = (packet[3] >> 4) & 3;
-		if(! (afc % 2))	//no payload in this TS packet
-		{
-			stream_skip(stream, buf_size-1+junk);
-			continue;
-		}
 
 		if(afc > 1)
 		{
@@ -2967,7 +2953,7 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 				c--;
 				stream_read(stream, pcrbuf, c);
 
-				if(has_pcr)
+				if(has_pcr && !probe)
 				{
 					int pcr_pid = prog_pcr_pid(priv, priv->prog);
 					if(pcr_pid == pid)
@@ -2993,6 +2979,22 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 				if(buf_size == 0)
 					continue;
 			}
+		}
+
+		// moved down here to allow PCR streams without any payloads
+		if(! (afc % 2))	//no payload in this TS packet
+		{
+			stream_skip(stream, buf_size-1+junk);
+			continue;
+		}
+
+		if(is_start)
+			tss->is_synced = 1;
+
+		if((!is_start && !tss->is_synced) || ((pid > 1) && (pid < 16)) || (pid == 8191))		//invalid pid
+		{
+			stream_skip(stream, buf_size-1+junk);
+			continue;
 		}
 
 		//find the program that the pid belongs to; if (it's the right one or -1) && pid_type==SL_SECTION
