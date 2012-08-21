@@ -81,6 +81,7 @@ static int setup_format(sh_audio_t *sh_audio, const AVCodecContext *lavc_context
     if (lavc_context->channels != sh_audio->channels ||
         samplerate != sh_audio->samplerate ||
         sample_format != sh_audio->sample_format) {
+        mp_msg(MSGT_DECAUDIO, MSGL_INFO, "Detected an audio config change.\n");
         sh_audio->channels=lavc_context->channels;
         sh_audio->samplerate=samplerate;
         sh_audio->sample_format = sample_format;
