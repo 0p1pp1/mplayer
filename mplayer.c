@@ -2434,6 +2434,8 @@ static double update_video(int *blit_frame)
     sh_video_t *const sh_video = mpctx->sh_video;
     //--------------------  Decode a frame: -----------------------
     double frame_time;
+    int size_changed;
+
     *blit_frame = 0; // Don't blit if we hit EOF
     if (!correct_pts) {
         unsigned char *start = NULL;
@@ -2448,6 +2450,13 @@ static double update_video(int *blit_frame)
             frame_time     = sh_video->next_frame_time;
             in_size = video_read_frame(sh_video, &sh_video->next_frame_time,
                                        &start, force_fps);
+            // size/aspect change
+            size_changed = in_size == -2;
+            if (size_changed) {
+                uninit_player(INITIALIZED_VO);
+                reinit_video_chain();
+                return 0.0;
+            }
 #ifdef CONFIG_DVDNAV
             // wait, still frame or EOF
             if (mpctx->stream->type == STREAMTYPE_DVDNAV && in_size < 0) {

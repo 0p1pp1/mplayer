@@ -328,6 +328,7 @@ mpeg_header_parser:
    }
    sh_video->disp_w=picture.display_picture_width;
    sh_video->disp_h=picture.display_picture_height;
+   sh_video->stream_aspect = mpeg12_aspect_info(&picture);
    // bitrate:
    if(picture.bitrate!=0x3FFFF) // unspecified/VBR ?
        sh_video->i_bps=picture.bitrate * 400 / 8;
@@ -506,6 +507,20 @@ int video_read_frame(sh_video_t* sh_video,float* frame_time_ptr,unsigned char** 
             mp_msg(MSGT_DECVIDEO,MSGL_INFO,MSGTR_EnterTelecineMode);
             telecine=1;
         }
+
+    if(sh_video->stream_aspect != mpeg12_aspect_info(&picture) ||
+       sh_video->disp_w != picture.display_picture_width ||
+       sh_video->disp_h != picture.display_picture_height){
+        mp_msg(MSGT_CPLAYER, MSGL_WARN, "Warning! video size changed "
+               "w:%d -> %d h:%d->%d ar:%5.3f -> %5.3f\n",
+               sh_video->disp_w, picture.display_picture_width,
+               sh_video->disp_h, picture.display_picture_height,
+               sh_video->stream_aspect, mpeg12_aspect_info(&picture));
+        sh_video->stream_aspect = mpeg12_aspect_info(&picture);
+        sh_video->disp_w = picture.display_picture_width;
+        sh_video->disp_h = picture.display_picture_height;
+        return -2;  // mark size-change
+    }
   } else if(video_codec == VIDEO_MPEG4){
         while(videobuf_len<VIDEOBUFFER_SIZE-MAX_VIDEO_PACKET_SIZE){
           int i=sync_video_packet(d_video);
