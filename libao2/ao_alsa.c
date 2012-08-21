@@ -684,7 +684,17 @@ static void uninit(int immed)
 static void audio_pause(void)
 {
     int err;
+    snd_pcm_status_t *status;
 
+    snd_pcm_status_alloca(&status);
+    if ((err = snd_pcm_status(alsa_handler, status)) < 0) {
+        mp_msg(MSGT_AO,MSGL_ERR,"AO: [alsa] failed to get pcm status:%s\n",
+                snd_strerror(err));
+        return;
+    }
+
+    if (snd_pcm_status_get_state(status) != SND_PCM_STATE_RUNNING)
+        return;
     if (alsa_can_pause) {
         if ((err = snd_pcm_pause(alsa_handler, 1)) < 0)
         {
@@ -705,19 +715,57 @@ static void audio_pause(void)
 static void audio_resume(void)
 {
     int err;
+    snd_pcm_status_t *status;
+    snd_pcm_state_t state;
+
+    err = 0;
 
     if (snd_pcm_state(alsa_handler) == SND_PCM_STATE_SUSPENDED) {
         mp_msg(MSGT_AO,MSGL_INFO,MSGTR_AO_ALSA_PcmInSuspendModeTryingResume);
         while ((err = snd_pcm_resume(alsa_handler)) == -EAGAIN) sleep(1);
     }
-    if (alsa_can_pause) {
+    if (err) {
+        mp_msg(MSGT_AO,MSGL_ERR,"AO: [alsa] failed to resume:%s\n",
+                snd_strerror(err));
+        return;
+    }
+
+    /* use _status() + _status_get_state() here instead of _get_state(),
+     * otherwise some ao's (e.g. "pulse" plugin) could be left paused,
+     * because its state could be mistaken as RUNNING due to the un-finished
+     * state transition by the previous _pause() call.
+     * Even if blocking mode is set, (at least) "pulse" plugin does not wait
+     * for the slave device to change its state in _pause(), and somehow,
+     * _status() seems to sync the state.
+     */
+    snd_pcm_status_alloca(&status);
+    if ((err = snd_pcm_status(alsa_handler, status)) < 0) {
+        mp_msg(MSGT_AO,MSGL_ERR,"AO: [alsa] failed to get pcm status:%s\n",
+                snd_strerror(err));
+        return;
+    }
+    state = snd_pcm_status_get_state(status);
+    if (alsa_can_pause && state == SND_PCM_STATE_PAUSED) {
         if ((err = snd_pcm_pause(alsa_handler, 0)) < 0)
         {
             mp_msg(MSGT_AO,MSGL_ERR,MSGTR_AO_ALSA_PcmResumeError, snd_strerror(err));
+            snd_pcm_prepare(alsa_handler);
             return;
         }
           mp_msg(MSGT_AO,MSGL_V,"alsa-resume: resume supported by hardware\n");
-    } else {
+        snd_pcm_avail_update(alsa_handler);
+        // don't use _get_state() to update the stream's state,
+        //  by the same reason as the above.
+        if ((err = snd_pcm_status(alsa_handler, status)) < 0) {
+            mp_msg(MSGT_AO,MSGL_ERR,"AO: [alsa] failed to get pcm status:%s\n",
+                    snd_strerror(err));
+            return;
+        }
+        state = snd_pcm_status_get_state(status);
+    }
+
+    if (state != SND_PCM_STATE_RUNNING && state != SND_PCM_STATE_PREPARED){
+        mp_msg(MSGT_AO,MSGL_V,"alsa-resume failed. preparing...\n");
         if ((err = snd_pcm_prepare(alsa_handler)) < 0)
         {
            mp_msg(MSGT_AO,MSGL_ERR,MSGTR_AO_ALSA_PcmPrepareError, snd_strerror(err));
@@ -804,15 +852,34 @@ static int get_space(void)
 
     snd_pcm_status_alloca(&status);
 
-    if ((ret = snd_pcm_status(alsa_handler, status)) < 0)
-    {
-	mp_msg(MSGT_AO,MSGL_ERR,MSGTR_AO_ALSA_CannotGetPcmStatus, snd_strerror(ret));
-	return 0;
-    }
+    do {
+        ret = snd_pcm_status(alsa_handler, status);
+        if (ret == -ESTRPIPE) {
+            mp_msg(MSGT_AO,MSGL_INFO,MSGTR_AO_ALSA_PcmInSuspendModeTryingResume);
+            while ((ret = snd_pcm_resume(alsa_handler)) == -EAGAIN)
+                sleep(1);
+        }
+        if (ret < 0 && ret != -EINTR) {
+            mp_msg(MSGT_AO, MSGL_ERR, MSGTR_AO_ALSA_CannotGetPcmStatus,
+                snd_strerror(ret));
+            snd_pcm_drop(alsa_handler);
+            snd_pcm_prepare(alsa_handler);
+            return ao_data.buffersize;
+        }
+    } while (ret != 0); // if EINTR, try again
 
-    ret = snd_pcm_status_get_avail(status) * bytes_per_sample;
-    if (ret > ao_data.buffersize)  // Buffer underrun?
+    ret = snd_pcm_avail(alsa_handler) * bytes_per_sample;
+    // "pulse" plugin returns > ao_data.buffersize after pause().
+    if (ret > ao_data.buffersize) { // Buffer underrun?
+        mp_msg(MSGT_AO, MSGL_V, "ao underran. state:%s buf: %d\n",
+               snd_pcm_state_name(snd_pcm_status_get_state(status)), ret);
+        snd_pcm_reset(alsa_handler);
+        if (snd_pcm_status_get_state(status) != SND_PCM_STATE_RUNNING) {
+            snd_pcm_drop(alsa_handler);
+            snd_pcm_prepare(alsa_handler);
+        }
 	ret = ao_data.buffersize;
+    }
     return ret;
 }
 
@@ -821,15 +888,36 @@ static float get_delay(void)
 {
   if (alsa_handler) {
     snd_pcm_sframes_t delay;
+    int res;
 
-    if (snd_pcm_delay(alsa_handler, &delay) < 0)
-      return 0;
+    do {
+        res = snd_pcm_delay(alsa_handler, &delay);
+        if (res == -ESTRPIPE) {
+            mp_msg(MSGT_AO,MSGL_INFO,MSGTR_AO_ALSA_PcmInSuspendModeTryingResume);
+            while ((res = snd_pcm_resume(alsa_handler)) == -EAGAIN)
+                sleep(1);
+        }
+        if (res < 0 && res != -EINTR) {
+            mp_msg(MSGT_AO, MSGL_ERR, "[AO ALSA] failed to get delay: %s\n",
+                snd_strerror(res));
+            snd_pcm_reset(alsa_handler);
+            snd_pcm_drop(alsa_handler);
+            snd_pcm_prepare(alsa_handler);
+            return 0;
+        }
+    } while (res != 0); // if EINTR, try again
 
-    if (delay < 0) {
+    if (delay <= 0) {
       /* underrun - move the application pointer forward to catch up */
 #if SND_LIB_VERSION >= 0x000901 /* snd_pcm_forward() exists since 0.9.0rc8 */
       snd_pcm_forward(alsa_handler, -delay);
 #endif
+      snd_pcm_reset(alsa_handler);
+      if (snd_pcm_state(alsa_handler) != SND_PCM_STATE_PREPARED) {
+        snd_pcm_drop(alsa_handler);
+        snd_pcm_prepare(alsa_handler);
+        mp_msg(MSGT_AO, MSGL_V, "ao underran. delay: %d\n", (int)delay);
+      }
       delay = 0;
     }
     return (float)delay / (float)ao_data.samplerate;
