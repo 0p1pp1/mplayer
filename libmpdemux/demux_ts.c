@@ -509,11 +509,11 @@ static int ts_check_file(demuxer_t * demuxer)
 		mp_msg(MSGT_DEMUX, MSGL_DBG2, "BUF: %02x %02x %02x %02x, PID %d, SIZE: %d \n",
 		ptr[0], ptr[1], ptr[2], ptr[3], pid, size);
 
-		if((pid == 8191) || (pid < 16))
+		if((pid == 8191) || (pid < 16) || (ptr[1] & 0x80))
 			continue;
 
 		cc[pid] = (ptr[3] & 0xf);
-		cc_ok = (last_cc[pid] < 0) || ((((last_cc[pid] + 1) & 0x0f) == cc[pid]));
+		cc_ok = (last_cc[pid] < 0) || ((((last_cc[pid] + !!(ptr[3] & 0x10)) & 0x0f) == cc[pid]));
 		mp_msg(MSGT_DEMUX, MSGL_DBG2, "PID %d, COMPARE CC %d AND LAST_CC %d\n", pid, cc[pid], last_cc[pid]);
 		if(! cc_ok)
 			//return 0;
@@ -2853,12 +2853,15 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 		}
 
 		cc = (packet[3] & 0xf);
-		cc_ok = (tss->last_cc < 0) || ((((tss->last_cc + 1) & 0x0f) == cc));
-		tss->last_cc = cc;
+		// CC increments only when a payload is present
+		cc_ok = (tss->last_cc < 0) || (((tss->last_cc + !!(packet[3] & 0x10)) & 0x0f) == cc);
+		if (!ts_error)
+			tss->last_cc = cc;
 
-		bad = ts_error; // || (! cc_ok);
+		bad = ts_error || (! cc_ok && pid != 0x1fff);
 		if(bad)
 		{
+			mp_msg(MSGT_DEMUX, MSGL_STATUS, "TS_PARSE: packet lost in 0x%04x E:%d\n", pid, ts_error);
 			if(priv->keep_broken == 0)
 			{
 				stream_skip(stream, buf_size-1+junk);
