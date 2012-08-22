@@ -133,6 +133,7 @@ static int cache_read(cache_vars_t *s, unsigned char *buf, int size)
 	} else {
 	    last_max = s->max_filepos;
 	    sleep_count = 0;
+	    continue;
 	}
 	// waiting for buffer fill...
 	if (stream_check_interrupt(READ_SLEEP_TIME)) {
@@ -616,6 +617,28 @@ int cache_stream_seek_long(stream_t *stream,int64_t pos){
 
   mp_msg(MSGT_CACHE,MSGL_V,"cache_stream_seek: WARNING! Can't seek to 0x%"PRIX64" !\n",pos+newpos);
   return 0;
+}
+
+int cache_preload(stream_t *s, int min /* percent */)
+{
+  int i;
+  int r;
+
+  if (!s || !s->cache_data)
+    return -1;
+
+  if (min > 30 && (r = cache_fill_status(s)) >= min - 5)
+    return r;
+
+  cache_wakeup(s);
+  i = 0;
+  while (i++ < 8 && (r = cache_fill_status(s)) < min - 1) {
+      mp_msg(MSGT_CACHE, MSGL_STATUS, "Cache re-fill (%d-th): %3d%%\r", i, r);
+      if (s->eof || stream_check_interrupt(PREFILL_SLEEP_TIME))
+          break;
+  }
+  mp_msg(MSGT_CACHE, MSGL_STATUS, "Cache re-fill end: %3d%%\r", r);
+  return r;
 }
 
 int cache_do_control(stream_t *stream, int cmd, void *arg) {

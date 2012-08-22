@@ -24,5 +24,6 @@
 void cache_uninit(stream_t *s);
 int cache_do_control(stream_t *stream, int cmd, void *arg);
 int cache_fill_status(stream_t *s);
+int cache_preload(stream_t *s, int min);
 
 #endif /* MPLAYER_CACHE2_H */

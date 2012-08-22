@@ -2859,6 +2859,26 @@ static int seek(MPContext *mpctx, double amount, int style)
     return 0;
 }
 
+static void refill_stream_cache(void)
+{
+    //cache re-fill?
+#ifdef CONFIG_STREAM_CACHE
+    if (mpctx->video_out && mpctx->sh_video && vo_config_count)
+        mpctx->video_out->control(VOCTRL_PAUSE, NULL);
+
+    if (mpctx->audio_out && mpctx->sh_audio)
+        mpctx->audio_out->pause();  // pause audio, keep data if possible
+
+    cache_preload(mpctx->stream, stream_cache_min_percent);
+
+    if (mpctx->audio_out && mpctx->sh_audio)
+        mpctx->audio_out->resume();
+
+    if (mpctx->video_out && mpctx->sh_video && vo_config_count)
+        mpctx->video_out->control(VOCTRL_RESUME, NULL);
+#endif
+}
+
 /* This preprocessor directive is a hack to generate a mplayer-nomain.o object
  * file for some tools to link against. */
 #ifndef DISABLE_MAIN
@@ -4056,6 +4076,8 @@ goto_enable_cache:
                 // unsigned integer type.
                 diff = GetTimerMS() - check_time;
 
+                mp_msg(MSGT_AVSYNC, MSGL_DBG2, "avsync diff:%d st:%d.\n",
+                       diff, mpctx->demuxer->stalled_time);
                 // we should not reset ao/vo if just a normal demuxer stall
                 //  (for descrambling) had happened in the last iteration,
                 // which results in a big "diff" value as well.
@@ -4080,7 +4102,13 @@ goto_enable_cache:
                     vout_time_usage    = 0;
                 }
 
+                // if demuxer stalled, then it might have discarded input data
+                // before descrambling became ready, so re-fill the stream cache.
                 if (mpctx->demuxer->stalled_time > 0) {
+                    mp_msg(MSGT_AVSYNC, MSGL_INFO,
+                            "demuxer requested to refill cache.\n");
+                    if (stream_cache_size > 0)
+                        refill_stream_cache();
                     mpctx->demuxer->stalled_time = 0;
                 }
                 check_time = GetTimerMS();
