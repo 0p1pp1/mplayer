@@ -572,7 +572,7 @@ void uninit_player(unsigned int mask)
         if (use_gui)
             gui(GUI_SET_AFILTER, NULL);
 #endif
-        mpctx->sh_audio      = NULL;
+        // mpctx->sh_audio      = NULL;
         mpctx->mixer.afilter = NULL;
     }
 
@@ -581,7 +581,7 @@ void uninit_player(unsigned int mask)
         current_module     = "uninit_vcodec";
         if (mpctx->sh_video)
             uninit_video(mpctx->sh_video);
-        mpctx->sh_video = NULL;
+        // mpctx->sh_video = NULL;
 #ifdef CONFIG_MENU
         vf_menu = NULL;
 #endif
@@ -2379,6 +2379,12 @@ int reinit_video_chain(void)
         eosd_ass_init(ass_library);
 #endif
 
+    if (initialized_flags & INITIALIZED_VCODEC) {
+        mpcodecs_config_vo(sh_video, sh_video->disp_w, sh_video->disp_h,
+                               sh_video->codec->outfmt[sh_video->outfmtidx]);
+        return 1;
+    }
+
     current_module = "init_video_codec";
 
     mp_msg(MSGT_CPLAYER, MSGL_INFO, "==========================================================================\n");
@@ -2418,7 +2424,9 @@ int reinit_video_chain(void)
     return 1;
 
 err_out:
+    uninit_player(INITIALIZED_VCODEC | INITIALIZED_VO);
     mpctx->sh_video = mpctx->d_video->sh = NULL;
+    mpctx->d_video->id = -2;
     return 0;
 }
 
@@ -2453,7 +2461,8 @@ static double update_video(int *blit_frame)
             // size/aspect change
             size_changed = in_size == -2;
             if (size_changed) {
-                uninit_player(INITIALIZED_VO);
+                mp_msg(MSGT_CPLAYER, MSGL_INFO, "Video size has changed.\n");
+                uninit_player(INITIALIZED_VCODEC);
                 reinit_video_chain();
                 return 0.0;
             }
