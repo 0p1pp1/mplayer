@@ -1827,7 +1827,15 @@ static int generate_video_frame(sh_video_t *sh_video, demux_stream_t *d_video)
         if (vf_output_queued_frame(sh_video->vfilter))
             break;
         current_module = "video_read_frame";
-        in_size = ds_get_packet_pts(d_video, &start, &pts);
+        // not every video format is frame-based, so we cannot use ds_get_packet
+        in_size = video_read_frame(sh_video, NULL, &start, force_fps);
+        pts = sh_video->pts;
+        if (in_size == -2) {
+                mp_msg(MSGT_CPLAYER, MSGL_INFO, "Video size has changed.\n");
+                uninit_player(INITIALIZED_VCODEC);
+                reinit_video_chain();
+                continue;
+        } else
 #ifdef CONFIG_DVDNAV
         // wait, still frame or EOF
         if (mpctx->stream->type == STREAMTYPE_DVDNAV && in_size < 0) {
@@ -1868,8 +1876,7 @@ static int generate_video_frame(sh_video_t *sh_video, demux_stream_t *d_video)
             current_module = "filter video";
             if (filter_video(sh_video, decoded_frame, sh_video->pts))
                 break;
-        } else if (drop_frame)
-            return -1;
+        }
         if (hit_eof)
             return 0;
     }
@@ -2576,8 +2583,10 @@ static double update_video(int *blit_frame)
                 start = NULL;
                 in_size = 0;
             }
-            if (mpctx->stream->type != STREAMTYPE_DVDNAV && in_size < 0)
+            if (mpctx->stream->type != STREAMTYPE_DVDNAV && in_size < 0) {
+                mp_msg(MSGT_CPLAYER, MSGL_V, "failed to read video frame.\n");
                 return -1;
+            }
             if (in_size > max_framesize)
                 max_framesize = in_size;  // stats
             drop_frame     = check_framedrop(frame_time);
@@ -2616,8 +2625,10 @@ static double update_video(int *blit_frame)
                                                         sh_video->pts));
     } else {
         int res = generate_video_frame(sh_video, mpctx->d_video);
-        if (!res)
+        if (!res) {
+            mp_msg(MSGT_AVSYNC, MSGL_V, "failed to generate video(%d).\n", res);
             return -1;
+        }
         ((vf_instance_t *)sh_video->vfilter)->control(sh_video->vfilter,
                                                       VFCTRL_GET_PTS, &sh_video->pts);
         if (sh_video->pts == MP_NOPTS_VALUE) {
@@ -2626,7 +2637,8 @@ static double update_video(int *blit_frame)
         }
         if (sh_video->last_pts == MP_NOPTS_VALUE)
             sh_video->last_pts = sh_video->pts;
-        else if (sh_video->last_pts > sh_video->pts) {
+        else if (sh_video->pts != MP_NOPTS_VALUE &&
+                 sh_video->last_pts > sh_video->pts) {
             // make a guess whether this is some kind of discontinuity
             // we should jump along with or some wrong timestamps we
             // should replace instead
@@ -3941,7 +3953,7 @@ goto_enable_cache:
                 if (!mpctx->num_buffered_frames) {
                     double frame_time = update_video(&blit_frame);
                     while (!blit_frame && mpctx->startup_decode_retry > 0) {
-                        double delay = mpctx->delay;
+                        //double delay = mpctx->delay;
                         // these initial decode failures are probably due to codec delay,
                         // ignore them and also their probably nonsense durations
                         update_video(&blit_frame);
