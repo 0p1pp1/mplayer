@@ -1686,7 +1686,8 @@ int demuxer_seek_chapter(demuxer_t *demuxer, int chapter, int mode,
             current = chapter;
         else {          //relative seeking
             uint64_t now;
-            now = (sh_video ? sh_video->pts : (sh_audio ? sh_audio->pts : 0.))
+            now = (sh_video && sh_video->pts != MP_NOPTS_VALUE ? sh_video->pts :
+                   (sh_audio && sh_audio->pts != MP_NOPTS_VALUE ? sh_audio->pts : 0.))
                   * 1000 + .5;
 
             for (current = total - 1; current >= 0; --current) {
@@ -1729,7 +1730,8 @@ int demuxer_get_current_chapter(demuxer_t *demuxer)
         sh_video_t *sh_video = demuxer->video->sh;
         sh_audio_t *sh_audio = demuxer->audio->sh;
         uint64_t now;
-        now = (sh_video ? sh_video->pts : (sh_audio ? sh_audio->pts : 0))
+        now = (sh_video && sh_video->pts != MP_NOPTS_VALUE ? sh_video->pts :
+               (sh_audio && sh_audio->pts != MP_NOPTS_VALUE ? sh_audio->pts : 0))
               * 1000 + 0.5;
         for (chapter = demuxer->num_chapters - 1; chapter >= 0; --chapter) {
             if (demuxer->chapters[chapter].start <= now)
