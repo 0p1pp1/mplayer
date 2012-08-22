@@ -2255,7 +2255,8 @@ static int fill_audio_out_buffers(void)
         usec_sleep(sleep_time * 1000);
     }
 
-    while (bytes_to_write) {
+    MP_MSG_DBGSYNC("A emp:%d delay:%g ", bytes_to_write, mpctx->delay);
+    while (bytes_to_write > 0) {
         int res;
         playsize = bytes_to_write;
         if (playsize > MAX_OUTBURST)
@@ -2267,6 +2268,7 @@ static int fill_audio_out_buffers(void)
         if (!format_change) {
             res = mp_decode_audio(sh_audio, playsize);
             format_change = res == -2;
+            mp_msg(MSGT_AVSYNC, MSGL_DBG2, "dec:%d ", sh_audio->a_out_buffer_len);
         }
         if (!format_change && res < 0) // EOF or error
             if (mpctx->d_audio->eof) {
@@ -2300,13 +2302,16 @@ static int fill_audio_out_buffers(void)
                     sh_audio->a_out_buffer_len);
             mpctx->delay += playback_speed * playsize / (double)ao_data.bps;
             bytes_to_write -= playsize;
+            mp_msg(MSGT_AVSYNC, MSGL_DBG2, "out:%d ", playsize);
         } else if ((format_change || audio_eof) && mpctx->audio_out->get_delay() < .04) {
             // Sanity check to avoid hanging in case current ao doesn't output
             // partial chunks and doesn't check for AOPLAY_FINAL_CHUNK
             mp_msg(MSGT_CPLAYER, MSGL_WARN, MSGTR_AudioOutputTruncated);
             sh_audio->a_out_buffer_len = 0;
-        }
+        } else // at least some ao's (ex. ao_alsa) may return with playsize<=0.
+            break;
     }
+    mp_msg(MSGT_AVSYNC, MSGL_DBG2, "-> %g\n", mpctx->delay);
     if (format_change) {
         uninit_player(INITIALIZED_AO);
         reinit_audio_chain();
