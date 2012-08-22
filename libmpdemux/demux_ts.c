@@ -2,6 +2,7 @@
  * Demultiplexer for MPEG2 Transport Streams.
  *
  * Written by Nico <nsabbi@libero.it>
+ * Modified by 0p1pp1
  * Kind feedback is appreciated; 'sucks' and alike is not.
  * Originally based on demux_pva.c written by Matteo Giani and FFmpeg (libavformat) sources
  *
@@ -1099,7 +1100,7 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 	priv->fifo[2].ds = demuxer->sub;
 
 	priv->fifo[0].buffer_size = 1536;
-	priv->fifo[1].buffer_size = 32767;
+	priv->fifo[1].buffer_size = 32767 * 4;
 	priv->fifo[2].buffer_size = 32767;
 
 	priv->pat.section.buffer_len = 0;
