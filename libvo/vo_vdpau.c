@@ -656,6 +656,7 @@ static int handle_preemption(void)
 {
     if (!is_preempted)
         return 0;
+    vdp_preemption_callback_register(vdp_device, NULL, NULL);
     is_preempted = 0;
     mp_msg(MSGT_VO, MSGL_INFO, "[vdpau] Attempting to recover from preemption.\n");
     if (win_x11_init_vdpau_procs() < 0 ||
@@ -1192,6 +1193,7 @@ static void uninit(void)
         return;
     visible_buf = 0;
 
+    mp_msg(MSGT_VO, MSGL_V, "vdpau uninit().\n");
     for (i = 0; i < MAX_VIDEO_SURFACES; i++) {
         // Allocated in ff_vdpau_add_data_chunk()
         av_freep(&surface_render[i].bitstream_buffers);
@@ -1267,6 +1269,7 @@ static int preinit(const char *arg)
     vid_width    = 0;
     vid_height   = 0;
 
+    is_preempted = 0;
     deint = 0;
     deint_type = 3;
     deint_counter = 0;
