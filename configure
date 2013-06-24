@@ -6321,6 +6321,19 @@ else
 fi
 echores "$_ass"
 
+echocheck "harfbuzz"
+_hb=no
+if test "$ass_internal" = yes && $_pkg_config --exists harfbuzz ; then
+    header_check hb.h $($_pkg_config --libs --cflags harfbuzz) &&_hb=yes
+fi
+echores "$_hb"
+if test "$_hb" = yes ; then
+    def_hb="#define CONFIG_HARFBUZZ 1"
+    extra_ldflags="$extra_ldflags $($_pkg_config --libs harfbuzz)"
+    extra_cflags="$extra_cflags $($_pkg_config --cflags harfbuzz)"
+else
+    def_hb="#undef CONFIG_HARFBUZZ"
+fi
 
 echocheck "ENCA"
 if test "$_enca" = auto ; then
@@ -8921,6 +8934,7 @@ $def_tv_v4l2
 /* font stuff */
 $def_ass
 $def_ass_internal
+$def_hb
 $def_bitmap_font
 $def_enca
 $def_fontconfig
