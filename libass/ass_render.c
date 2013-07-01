@@ -2597,8 +2597,11 @@ ASS_Image *ass_render_frame(ASS_Renderer *priv, ASS_Track *track,
     cnt = 0;
     for (i = 0; i < track->n_events; ++i) {
         ASS_Event *event = track->events + i;
-        if ((event->Start <= now)
-            && (now < (event->Start + event->Duration))) {
+        long long end = event->Start + event->Duration;
+        // handle PTS roll-over in mpeg TS
+#define MPEGTS_MAXTS_MS (((2ULL << 33) + 89) / 90)
+        if ((event->Start <= now && now < end)
+            || (end > MPEGTS_MAXTS_MS && now + MPEGTS_MAXTS_MS < end)) {
             if (cnt >= priv->eimg_size) {
                 priv->eimg_size += 100;
                 priv->eimg =
