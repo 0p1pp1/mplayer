@@ -2064,7 +2064,8 @@ ass_msg(render_priv->library, MSGL_V, "gidx:%x pos:(%g,%g) adv:(%g,%g)",
     }
 
     // wrap lines
-    if (render_priv->state.evt_type != EVENT_HSCROLL) {
+    if ((render_priv->state.evt_type != EVENT_HSCROLL && !vertical) ||
+        (render_priv->state.evt_type != EVENT_VSCROLL && vertical)) {
         // rearrange text in several lines
 ass_msg(render_priv->library, MSGL_DBG2, "max_txt_w:%g", max_text_width);
         wrap_lines_smart(render_priv, max_text_width);
@@ -2172,31 +2173,49 @@ ass_msg(render_priv->library, MSGL_DBG2, "bbox (%g,%g) (%g,%g)",
         render_priv->state.evt_type == EVENT_VSCROLL)) {
         device_x = x2scr(render_priv, MarginL);
     } else if (!vertical && render_priv->state.evt_type == EVENT_HSCROLL) {
-        if (render_priv->state.scroll_direction == SCROLL_RL)
+        int endpos;
+        if (render_priv->state.scroll_direction == SCROLL_RL) {
             device_x =
                 x2scr(render_priv,
-                      render_priv->track->PlayResX -
+                      render_priv->state.clip_x1 -
                       render_priv->state.scroll_shift);
-        else if (render_priv->state.scroll_direction == SCROLL_LR)
+            endpos = x2scr(render_priv, render_priv->state.clip_x0);
+            if (render_priv->state.scroll_autostop && device_x < endpos)
+                device_x = endpos;
+        } else if (render_priv->state.scroll_direction == SCROLL_LR) {
             device_x =
                 x2scr(render_priv,
                       render_priv->state.scroll_shift) - (bbox.xMax -
                                                           bbox.xMin);
+            endpos = x2scr(render_priv, render_priv->state.clip_x1)
+                        - (bbox.xMax - bbox.xMin);
+            if (render_priv->state.scroll_autostop && device_x > endpos)
+                device_x = endpos;
+        }
     } else if (vertical && (render_priv->state.evt_type == EVENT_NORMAL ||
                render_priv->state.evt_type == EVENT_HSCROLL)) {
         device_y = y2scr(render_priv, MarginL);
     } else if (vertical && render_priv->state.evt_type == EVENT_VSCROLL) {
-        if (render_priv->state.scroll_direction == SCROLL_TB)
+        int endpos;
+        if (render_priv->state.scroll_direction == SCROLL_TB) {
             device_y =
                 y2scr(render_priv,
                       render_priv->state.clip_y0 +
                       render_priv->state.scroll_shift) - (bbox.yMax -
                                                           bbox.yMin);
-        else if (render_priv->state.scroll_direction == SCROLL_BT)
+            endpos = y2scr(render_priv, render_priv->state.clip_y1)
+                        - (bbox.yMax - bbox.yMin);
+            if (render_priv->state.scroll_autostop && device_y > endpos)
+                device_y = endpos;
+        } else if (render_priv->state.scroll_direction == SCROLL_BT) {
             device_y =
                 y2scr(render_priv,
                       render_priv->state.clip_y1 -
                       render_priv->state.scroll_shift);
+            endpos = y2scr(render_priv, render_priv->state.clip_y0);
+            if (render_priv->state.scroll_autostop && device_y < endpos)
+                device_y = endpos;
+        }
     }
 
     // y coordinate for everything except positioned events
@@ -2232,17 +2251,26 @@ ass_msg(render_priv->library, MSGL_DBG2, "bbox (%g,%g) (%g,%g)",
             }
         }
     } else if (!vertical && render_priv->state.evt_type == EVENT_VSCROLL) {
-        if (render_priv->state.scroll_direction == SCROLL_TB)
+        int endpos;
+        if (render_priv->state.scroll_direction == SCROLL_TB) {
             device_y =
                 y2scr(render_priv,
                       render_priv->state.clip_y0 +
                       render_priv->state.scroll_shift) - (bbox.yMax -
                                                           bbox.yMin);
-        else if (render_priv->state.scroll_direction == SCROLL_BT)
+            endpos = y2scr(render_priv, render_priv->state.clip_y1)
+                        - (bbox.yMax - bbox.yMin);
+            if (render_priv->state.scroll_autostop && device_y > endpos)
+                device_y = endpos;
+        } else if (render_priv->state.scroll_direction == SCROLL_BT) {
             device_y =
                 y2scr(render_priv,
                       render_priv->state.clip_y1 -
                       render_priv->state.scroll_shift);
+            endpos = y2scr(render_priv, render_priv->state.clip_y0);
+            if (render_priv->state.scroll_autostop && device_y < endpos)
+                device_y = endpos;
+        }
     } else if (vertical && (render_priv->state.evt_type == EVENT_NORMAL ||
                render_priv->state.evt_type == EVENT_VSCROLL)) {
         if (halign == HALIGN_LEFT) {
@@ -2264,17 +2292,27 @@ ass_msg(render_priv->library, MSGL_DBG2, "bbox (%g,%g) (%g,%g)",
             device_x -= text_info->lines[0].asc;
         }
     } else if (vertical && render_priv->state.evt_type == EVENT_HSCROLL) {
-        if (render_priv->state.scroll_direction == SCROLL_LR)
+        int endpos;
+        if (render_priv->state.scroll_direction == SCROLL_LR) {
             device_x =
                 x2scr(render_priv,
                       render_priv->state.clip_x0 +
                       render_priv->state.scroll_shift) - text_info->lines[0].asc;
-        else if (render_priv->state.scroll_direction == SCROLL_RL)
+            endpos = x2scr(render_priv, render_priv->state.clip_x1)
+                        - text_info->lines[0].asc;
+            if (render_priv->state.scroll_autostop && device_x > endpos)
+                device_x = endpos;
+        } else if (render_priv->state.scroll_direction == SCROLL_RL) {
             device_x =
                 x2scr(render_priv,
                       render_priv->state.clip_x1 -
                       render_priv->state.scroll_shift) +
                         text_info->height - text_info->lines[0].asc;
+            endpos = x2scr(render_priv, render_priv->state.clip_x0)
+                        + text_info->height - text_info->lines[0].asc;
+            if (render_priv->state.scroll_autostop && device_x < endpos)
+                device_x = endpos;
+        }
     }
 
     // positioned events are totally different
@@ -2288,9 +2326,8 @@ ass_msg(render_priv->library, MSGL_DBG2, "bbox (%g,%g) (%g,%g)",
             x2scr_pos(render_priv, render_priv->state.pos_x) - base_x;
         device_y =
             y2scr_pos(render_priv, render_priv->state.pos_y) - base_y;
-ass_msg(render_priv->library, MSGL_DBG2, "bp:(%g,%g) dev:(%g,%g)",
-    base_x, base_y, device_x, device_y);
     }
+ass_msg(render_priv->library, MSGL_DBG2, "dev_pos:(%g,%g)", device_x, device_y);
 
     // fix clip coordinates (they depend on alignment)
     if (render_priv->state.evt_type == EVENT_NORMAL ||
