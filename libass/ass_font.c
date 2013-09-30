@@ -229,7 +229,9 @@ void ass_face_set_size(FT_Face face, double size)
     }
     memset(&rq, 0, sizeof(rq));
     rq.type = FT_SIZE_REQUEST_TYPE_REAL_DIM;
-    rq.width = 0;
+    // hack for cell spacing of CJK characters
+    //   em.X -> size,  (asc + desc) -> size
+    rq.width = double_to_d6(size * (face->ascender - face->descender) / face->units_per_EM);
     rq.height = double_to_d6(size * mscale);
     rq.horiResolution = rq.vertResolution = 0;
     FT_Request_Size(face, &rq);
