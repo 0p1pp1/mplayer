@@ -30,7 +30,7 @@
 #define SUBPIXEL_MASK 63
 #define SUBPIXEL_ACCURACY 7
 
-#define MPEGTS_MAXTS_MS (((2ULL << 33) + 89) / 90)
+#define MPEGTS_MAXTS_MS (((2LL << 33) + 89) / 90)
 
 ASS_Renderer *ass_renderer_init(ASS_Library *library)
 {
@@ -2916,7 +2916,7 @@ ASS_Image *ass_render_frame(ASS_Renderer *priv, ASS_Track *track,
     }
 
     if (track->streaming_mode) {
-        unsigned int a, b, mid;
+        int a, b, mid;
         int cmp;
 
         // sort by start time
