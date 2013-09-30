@@ -2483,7 +2483,7 @@ ass_msg(render_priv->library, MSGL_DBG2, "dev_pos:(%g,%g)", device_x, device_y);
     event_images->imgs = render_text(render_priv, (int) device_x, (int) device_y);
 
     // add a mat image of clipping area
-    if ((render_priv->state.c[5] & 0xFF) != 0 &&
+    if ((render_priv->state.c[4] & 0xFF) != 0 &&
         render_priv->state.clip_mode == 0) {
         ASS_Image *img = malloc(sizeof(ASS_Image));
 
