@@ -2013,7 +2013,7 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
         } else {
         // add horizontal letter spacing
         info->cluster_advance.x += double_to_d6(info->hspacing *
-                render_priv->font_scale * info->scale_x / render_priv->font_scale_x);
+                render_priv->font_scale * info->scale_x);
 
         // add displacement for vertical shearing
         info->cluster_advance.y += (info->fay / info->scale_x * info->scale_y) * info->cluster_advance.x;
