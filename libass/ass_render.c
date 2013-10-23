@@ -2488,7 +2488,7 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
     event_images->imgs = render_text(render_priv, (int) device_x, (int) device_y);
 
     // add a mat image of clipping area
-    if ((render_priv->state.c[4] & 0xFF) != 0 &&
+    if ((render_priv->state.c[4] & 0xFF) != 0xFF &&
         render_priv->state.clip_mode == 0) {
         ASS_Image *img = malloc(sizeof(ASS_Image));
 
