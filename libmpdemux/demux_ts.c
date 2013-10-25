@@ -1760,6 +1760,7 @@ static int parse_pat(ts_priv_t * priv, int is_start, unsigned char *buff, int si
 	int entries, i;
 	uint16_t progid;
 	ts_section_t *section;
+	uint8_t ver;
 
 	section = &(priv->pat.section);
 	skip = collect_section(section, is_start, buff, size);
@@ -1772,9 +1773,18 @@ static int parse_pat(ts_priv_t * priv, int is_start, unsigned char *buff, int si
 	if(priv->pat.table_id != 0)
 		return 0;
 	priv->pat.ssi = (ptr[1] >> 7) & 0x1;
+	if(!(ptr[5] & 0x01)) {
+		mp_msg(MSGT_DEMUX, MSGL_V, "ignorening a non-current PAT.\n");
+		return 0;
+	}
 	priv->pat.curr_next = ptr[5] & 0x01;
 	priv->pat.ts_id = (ptr[3]  << 8 ) | ptr[4];
-	priv->pat.version_number = (ptr[5] >> 1) & 0x1F;
+	ver = (ptr[5] >> 1) & 0x1F;
+	if (priv->pat.progs && priv->pat.version_number == ver) {
+		mp_msg(MSGT_DEMUX, MSGL_V, "ignoreing an unchanged PAT\n");
+		return 0;
+	}
+	priv->pat.version_number = ver;
 	priv->pat.section_length = ((ptr[1] & 0x03) << 8 ) | ptr[2];
 	priv->pat.section_number = ptr[6];
 	priv->pat.last_section_number = ptr[7];
@@ -1782,13 +1792,37 @@ static int parse_pat(ts_priv_t * priv, int is_start, unsigned char *buff, int si
 	//check_crc32(0xFFFFFFFFL, ptr, priv->pat.buffer_len - 4, &ptr[priv->pat.buffer_len - 4]);
 	mp_msg(MSGT_DEMUX, MSGL_V, "PARSE_PAT: section_len: %d, section %d/%d\n", priv->pat.section_length, priv->pat.section_number, priv->pat.last_section_number);
 
+	// reset old PAT & PMT */
+	if (priv->pat.progs) {
+		mp_msg(MSGT_DEMUX, MSGL_DBG2, "releasing the previous PAT & PMT's\n");
+		free(priv->pat.progs);
+		priv->pat.progs = NULL;
+		priv->pat.progs_cnt = 0;
+
+		for(i = 0; priv->pmt && i < priv->pmt_cnt; i++) {
+			free(priv->pmt[i].section.buffer);
+			free(priv->pmt[i].es);
+		}
+		free(priv->pmt);
+		priv->pmt = NULL;
+		priv->pmt_cnt = 0;
+	}
+
 	entries = (int) (priv->pat.section_length - 9) / 4;	//entries per section
+	priv->pat.progs = calloc(entries, sizeof(struct pat_progs_t));
+	if (entries > 0 && !priv->pat.progs) {
+		mp_msg(MSGT_DEMUX, MSGL_ERR, "PARSE_PAT: COULDN'T ALLOC PAT progs table.\n");
+		return 0;
+	}
 
 	for(i=0; i < entries; i++)
 	{
 		int32_t idx;
 		base = &ptr[8 + i*4];
 		progid = (base[0] << 8) | base[1];
+
+		if (progid == 0)	// skip NIT description
+			continue;
 
 		if((idx = prog_idx_in_pat(priv, progid)) == -1)
 		{
@@ -2468,6 +2502,27 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 	pmt->table_id = base[0];
 	if(pmt->table_id != 2)
 		return -1;
+	if (!(base[5] & 1))
+	{
+		mp_msg(MSGT_DEMUX, MSGL_DBG2, "Ignoreing a non-current PMT.\n");
+		return 0;
+	}
+	if (pmt->version_number == ((base[5] >> 1) & 0x1f))
+	{
+		mp_msg(MSGT_DEMUX, MSGL_DBG2, "Ignoreing an unchanged PMT.\n");
+		return 0;
+	}
+	if (pmt->es) {
+		mp_msg(MSGT_DEMUX, MSGL_V, "releasing the previous PMT.\n");
+		free(pmt->es);
+		pmt->es = NULL;
+		pmt->es_cnt = 0;
+		free(pmt->od);
+		pmt->od_cnt = 0;
+		free(pmt->mp4es);
+		pmt->mp4es_cnt = 0;
+	}
+
 	pmt->ssi = base[1] & 0x80;
 	pmt->section_length = (((base[1] & 0xf) << 8 ) | base[2]);
 	pmt->version_number = (base[5] >> 1) & 0x1f;
