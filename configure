@@ -387,6 +387,7 @@ Optional features:
   --enable-ass-internal  enable internal SSA/ASS subtitle support [autodetect]
   --disable-ass          disable SSA/ASS subtitle support [autodetect]
   --enable-rpath         enable runtime linker path for extra libs [disabled]
+  --disable-bcas         disable BCAS descrambling using libdemulti2 [autodetect]
 
 Codecs:
   --enable-gif              enable GIF support [autodetect]
@@ -853,6 +854,7 @@ _rpath=no
 _asmalign_pot=auto
 _stream_cache=yes
 _priority=no
+_bcas=auto
 def_dos_paths="#define HAVE_DOS_PATHS 0"
 def_stream_cache="#define CONFIG_STREAM_CACHE 1"
 def_path_max_check="#define CONFIG_PATH_MAX_CHECK 0"
@@ -1446,6 +1448,7 @@ for ac_option do
   --enable-mmx) _mmx=yes ;;
   --disable-mmx) # 3DNow! and MMX2 require MMX
         _3dnow=no _3dnowext=no _mmx=no _mmxext=no ;;
+  --disable-bcas) _bcas=no ;;
 
   # Handle these options in a second pass.
   --*-decoder=*|--*-encoder=*|--*-parser=*|--*-protocol=*|--*-demuxer=*|--*-muxer=*|--*-filter=*)  ;;
@@ -7964,6 +7967,20 @@ else
 fi
 echores "$_lircc"
 
+echocheck "bcas descrambling"
+if test "$_bcas" = auto ; then
+  _bcas=no
+  header_check demulti2.h -ldemulti2 && test "x$_dl" = xyes && _bcas=yes
+fi
+if test "$_bcas" = yes ; then
+  def_demulti2='#define CONFIG_DEMULTI2 1'
+  extra_ldflags="$extra_ldflags -ldemulti2 $ld_dl"
+else
+  def_demulti2='#undef CONFIG_DEMULTI2'
+fi
+echores "$_bcas"
+
+
 if arm; then
 # Detect Maemo development platform libraries availability (http://www.maemo.org),
 # they are used when run on Nokia 770|8x0
@@ -8336,6 +8353,7 @@ APPLE_IR = $_apple_ir
 APPLE_REMOTE = $_apple_remote
 ARTS = $_arts
 AUDIO_INPUT = $_audio_input
+BCAS = $_bcas
 BITMAP_FONT = $_bitmap_font
 BL = $_bl
 CACA = $_caca
@@ -8779,7 +8797,7 @@ $def_sighandler
 $def_sortsub
 $def_stream_cache
 $def_pthread_cache
-
+$def_demulti2
 
 /* CPU stuff */
 #define __CPU__ $iproc

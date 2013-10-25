@@ -41,6 +41,10 @@
 #include "mpeg_hdr.h"
 #include "demux_ts.h"
 
+#if CONFIG_DEMULTI2
+#include <demulti2.h>
+#endif
+
 #define TS_PH_PACKET_SIZE 192
 #define TS_FEC_PACKET_SIZE 204
 #define TS_PACKET_SIZE 188
@@ -111,6 +115,7 @@ typedef struct {
 	es_stream_type_t type, subtype;
 	double pts, last_pts;
 	int pid;
+	int ecm_pid;
 	char lang[4];
 	// copy from PMT
 	char lang2[4];
@@ -135,10 +140,24 @@ typedef struct {
 	int type;
 } sh_av_t;
 
+typedef struct {
+  uint16_t cas_id;
+  uint16_t pid;
+  uint8_t emm_type;
+} cas_t;
+
+typedef struct {
+	cas_t cas;
+	uint8_t version_number;
+
+	ts_section_t section;
+} ecm_t;
+
 typedef struct MpegTSContext {
 	int packet_size; 		// raw packet size, including FEC if present e.g. 188 bytes
 	ES_stream_t *pids[NB_PID_MAX];
 	sh_av_t streams[NB_PID_MAX];
+	ecm_t *ecms[NB_PID_MAX];
 } MpegTSContext;
 
 
@@ -220,6 +239,7 @@ typedef struct {
 	uint8_t last_section_number;
 	uint16_t PCR_PID;
 	uint16_t prog_descr_length;
+	cas_t prog_ecm;
 	ts_section_t section;
 	uint16_t es_cnt;
 	struct pmt_es_t {
@@ -231,6 +251,7 @@ typedef struct {
 		uint8_t lang2[4];
 		uint8_t is_dualmono;
 		uint16_t mp4_es_id;
+		cas_t es_ecm;
 		int component_tag;
 		uint16_t highCN_pid; // alternative PES for high C/N condition(ISDB-S)
 	} *es;
@@ -254,6 +275,8 @@ typedef struct {
 	pat_t pat;
 	pmt_t *pmt;
 	uint16_t pmt_cnt;
+	void *dm2_handle;
+	cas_t emm;
 	double pcr_delta;
 	uint32_t prog;
 	uint32_t vbitrate;
@@ -692,6 +715,7 @@ typedef struct {
 	char slang[32];
 	uint16_t prog;
 	off_t probe;
+	int scrambled;
 } tsdemux_init_t;
 
 //second stage: returns the count of A52 syncwords found
@@ -766,6 +790,7 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 
 		if(ts_parse(demuxer, &es, tmp, 1))
 		{
+			param->scrambled |= (tmp[3] & 0xC0);
 			//Non PES-aligned A52 audio may escape detection if PMT is not present;
 			//in this case we try to find at least 3 A52 syncwords
 			if((es.type == PES_PRIVATE1) && (! audio_found) && req_apid > -2)
@@ -1249,6 +1274,7 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 	{
 	    priv->ts.pids[i] = NULL;
 	    priv->ts.streams[i].id = -3;
+	    // priv->ts.ecms[i] = NULL; /* priv is calloced. */
 	}
 	priv->pat.progs = NULL;
 	priv->pat.progs_cnt = 0;
@@ -1280,6 +1306,7 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 	params.spid = demuxer->sub->id;
 	params.prog = ts_prog;
 	params.probe = ts_probe;
+	params.scrambled = 0;
 
 	if(audio_lang != NULL)
 	{
@@ -1296,6 +1323,10 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 	}
 	else
 		memset(params.slang, 0, sizeof(params.slang));
+
+#ifdef CONFIG_DEMULTI2
+	priv->dm2_handle = demulti2_open();
+#endif
 
 	start_pos = ts_detect_streams(demuxer, &params);
 
@@ -1392,6 +1423,11 @@ static void demux_close_ts(demuxer_t * demuxer)
 
 	if(priv)
 	{
+#if CONFIG_DEMULTI2
+		if (priv->dm2_handle)
+			demulti2_close(priv->dm2_handle);
+#endif
+
 		free(priv->pat.section.buffer);
 		free(priv->pat.progs);
 		free(priv->eit_section.buffer);
@@ -1411,6 +1447,11 @@ static void demux_close_ts(demuxer_t * demuxer)
 				free(priv->ts.pids[i]->section.buffer);
 			free(priv->ts.pids[i]);
 			priv->ts.pids[i] = NULL;
+
+			if (priv->ts.ecms[i])
+				free(priv->ts.ecms[i]->section.buffer);
+			free(priv->ts.ecms[i]);
+			priv->ts.ecms[i] = NULL;
 		}
 		for (i = 0; i < 3; i++)
 		{
@@ -2592,6 +2633,7 @@ static ES_stream_t *new_pid(ts_priv_t *priv, int pid)
 	if(! tss)
 		return NULL;
 	tss->pid = pid;
+	tss->ecm_pid = 8192;
 	tss->last_cc = -1;
 	tss->type = UNKNOWN;
 	tss->subtype = UNKNOWN;
@@ -2627,6 +2669,16 @@ static int parse_program_descriptors(pmt_t *pmt, uint8_t *buf, uint16_t len)
 			else
 				k = 4;		//this is standard compliant
 			parse_mp4_descriptors(pmt, &buf[i+k], (int) buf[i+1]-(k-2), NULL);
+		}
+		else if (buf[i] == 0x09)  // CA descriptor
+		{
+			// if there are multiple CA desc specified, overrides the old one.
+			// but this desc. should be specified exactly once.
+			pmt->prog_ecm.cas_id = buf[i + 2] << 8 | buf[i + 3];
+			pmt->prog_ecm.pid = (buf[i + 4] << 8 | buf[i + 5]) & 0x1fff;
+			mp_msg(MSGT_DEMUX, MSGL_DBG2,
+				"Program CA found.(casid:%d pid:0x%04hx)\n",
+				pmt->prog_ecm.cas_id, pmt->prog_ecm.pid);
 		}
 
 		len -= 2 + buf[i+1];
@@ -2767,6 +2819,13 @@ static int parse_descriptors(struct pmt_es_t *es, uint8_t *ptr)
 			// 0x1f is FMC, but currently it is easiest to handle them the same way
 			es->mp4_es_id = (ptr[j+2] << 8) | ptr[j+3];
 			mp_msg(MSGT_DEMUX, MSGL_V, "SL Descriptor: ES_ID: %d(%x), pid: %d\n", es->mp4_es_id, es->mp4_es_id, es->pid);
+		}
+		else if (ptr[j] == 0x09) // CA descriptor
+		{
+			es->es_ecm.cas_id = (ptr[j+2] << 8) | ptr[j+3];
+			es->es_ecm.pid = ((ptr[j+4] << 8) | ptr[j+5]) & 0x1fff;
+			mp_msg(MSGT_DEMUX, MSGL_DBG2, "ES CA found.(casid:%d pid:0x%04hx)\n",
+				es->es_ecm.cas_id, es->es_ecm.pid);
 		}
 		else if(ptr[j] == 0x52)	// Stream Identifier
 		{
@@ -2968,6 +3027,30 @@ static int parse_eit(ts_priv_t * priv, int is_start, unsigned char *buff, int si
 	return 0;
 }
 
+
+static void ts_add_ecm(ts_priv_t *priv, cas_t *cas)
+{
+	ecm_t *ecm;
+
+	if (cas->pid >= 8191)
+		return;
+	if (priv->ts.ecms[cas->pid])
+		return;
+
+	ecm = (ecm_t *) calloc(1, sizeof(ecm_t));
+	if (ecm == NULL)
+	{
+		mp_msg(MSGT_DEMUX, MSGL_ERR, "ts_add_ecm, couldn't alloc ecm_t.\n");
+		return;
+	}
+
+	ecm->cas.cas_id = cas->cas_id;
+	ecm->cas.pid = cas->pid;
+	ecm->version_number = 0x20;
+	priv->ts.ecms[cas->pid] = ecm;
+	return;
+}
+
 static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_start, unsigned char *buff, int size)
 {
 	unsigned char *base, *es_base;
@@ -2999,6 +3082,7 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 		priv->pmt[idx].progid = progid;
 		priv->pmt[idx].version_number = VERSION_NONE;
 		priv->pmt[idx].eit_version = VERSION_NONE;
+		priv->pmt[idx].prog_ecm.pid = 8192;  // set INVALID PID
 	}
 
 	pmt = &(priv->pmt[idx]);
@@ -3042,6 +3126,7 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 		pmt->od_cnt = 0;
 		free(pmt->mp4es);
 		pmt->mp4es_cnt = 0;
+		pmt->prog_ecm.pid = 8192;
 	}
 
 	pmt->ssi = base[1] & 0x80;
@@ -3064,6 +3149,9 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 	if(pmt->prog_descr_length)
 		parse_program_descriptors(pmt, &base[12], pmt->prog_descr_length);
 
+	if (pmt->prog_ecm.pid < 8191)
+		ts_add_ecm(priv, &pmt->prog_ecm);
+
 	es_base = &base[12 + pmt->prog_descr_length];	//the beginning of th ES loop
 
 	section_bytes= pmt->section_length - 13 - pmt->prog_descr_length;
@@ -3073,6 +3161,7 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 	while(section_bytes >= 5)
 	{
 		int es_pid, es_type;
+		cas_t es_ecm;
 
 		es_type = es_base[0];
 		es_pid = ((es_base[1] & 0x1f) << 8) | es_base[2];
@@ -3090,6 +3179,7 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 			}
 			idx = pmt->es_cnt;
 			memset(&(pmt->es[idx]), 0, sizeof(struct pmt_es_t));
+			pmt->es[idx].es_ecm.pid = 8192;
 			pmt->es[idx].component_tag = -1;
 			pmt->es_cnt++;
 		}
@@ -3115,6 +3205,14 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 		pmt->es[idx].lang[0] = 0;
 		pmt->es[idx].highCN_pid = 0;
 		parse_descriptors(&pmt->es[idx], &es_base[5]);
+
+		if (pmt->es[idx].es_ecm.pid < 8192) // per-stream ECM specified.
+			es_ecm = pmt->es[idx].es_ecm;
+		else
+			es_ecm = pmt->prog_ecm;
+
+		if (es_ecm.pid < 8191)
+			ts_add_ecm(priv, &es_ecm);
 
 		switch(es_type)
 		{
@@ -3190,7 +3288,10 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 
 			// copy PES info to priv->ts.pids[] and sh
 			tss->type = pmt->es[idx].type;
+			tss->ecm_pid = es_ecm.pid;
 			tss->component_tag = ctag;
+			mp_msg(MSGT_DEMUX, MSGL_DBG2,
+				"set CA(pid:0x%04hx) for ES(pid:0x%04hx)\n", es_ecm.pid, es_pid);
 			// PES's can be shared amoung programs
 			if (tss->prog_idx < 0 || progid == priv->prog) {
 				tss->prog_idx = pidx;
@@ -3220,6 +3321,77 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 
 	mp_msg(MSGT_DEMUX, MSGL_V, "----------------------------\n");
 	return 1;
+}
+
+static void parse_ecm(ts_priv_t *priv, uint16_t pid, int is_start,
+			unsigned char *buf, int size)
+{
+#ifdef CONFIG_DEMULTI2
+	ecm_t *ecm;
+	int skip;
+	unsigned char *ptr;
+	int len;
+	uint8_t version;
+	int ret;
+
+	if (priv->dm2_handle == NULL) {
+		mp_msg(MSGT_DEMUX, MSGL_V, "ECM decoding feature not ready.\n");
+		return;
+	}
+
+	mp_msg(MSGT_DEMUX, MSGL_DBG2, "parsing an ECM section.\n");
+
+	if (priv->ts.ecms[pid] == NULL)
+		return;
+
+	if (priv->ts.ecms[pid]->cas.cas_id != 0x0005)
+		return;
+
+	ecm = priv->ts.ecms[pid];
+	skip = collect_section(&ecm->section, is_start, buf, size);
+	if (!skip)
+		return;
+	ptr = &ecm->section.buffer[skip];
+
+	if (ptr[0] != 0x82)
+	{
+		mp_msg(MSGT_DEMUX, MSGL_INFO, "parse_ecm: invalid tid:0x%02hhx\n",
+			ptr[0]);
+		return;
+	}
+
+	// processing the next ECM beforehand is OK,
+	//  because Ks[{odd,even}] is updated in turn, replacing the unused one.
+/*
+	if (!(ptr[5] & 0x01))
+	{
+		mp_msg(MSGT_DEMUX, MSGL_DBG2, "ECM not yet applicable.\n");
+		return;
+	}
+ */
+	version = (ptr[5] & 0x3e) >> 1;
+	if (version == ecm->version_number)
+	{
+		mp_msg(MSGT_DEMUX, MSGL_DBG2, "Ignoring an unchanged ECM.\n");
+		return;
+	}
+	ecm->version_number = version;
+
+	// remove the section header & section CRC trailer
+	len = (((ptr[1] & 0x0f) << 8) | ptr[2]) - 5 -4;
+	ptr = &ecm->section.buffer[skip + 8];
+
+	if (len < 30 || len >= 256)
+	{
+		mp_msg(MSGT_DEMUX, MSGL_WARN, "Too long ECM message(%d)\n", len);
+		return;
+	}
+
+	ret = demulti2_feed_ecm(priv->dm2_handle, ptr, len, pid);
+	if (ret != DEMULTI2_RET_OK)
+		mp_msg(MSGT_DEMUX, MSGL_V, "failed to feed ECM (%d)\n", ret);
+#endif /* CONFIG_DEMULTI2 */
+	return;
 }
 
 static pmt_t* pmt_of_pid(ts_priv_t *priv, int pid, mp4_decoder_config_t **mp4_dec)
@@ -3480,6 +3652,7 @@ static void reselect_streams(demuxer_t *demuxer)
 static void reset_es(ts_priv_t *priv, int pid)
 {
 	ES_stream_t *es;
+	ecm_t *ecm;
 
 	if (!priv || pid < 16 || pid >= 8191)
 		return;
@@ -3491,6 +3664,17 @@ static void reset_es(ts_priv_t *priv, int pid)
 	es->last_cc = -1;
 	es->is_synced = 0;
 
+	if (es->ecm_pid < 0 || es->ecm_pid >= 8191)
+		return;
+
+	ecm = priv->ts.ecms[es->ecm_pid];
+	if (!ecm)
+		return;
+
+	// reset ECM status
+	// It may be reset multiple times as the ECM stream can be shared
+	// amoung PES's, but that's ok and no halm.
+	ecm->version_number = 0x20; // reset the previous version number
 	return;
 }
 
@@ -3567,6 +3751,7 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 	pmt_t *pmt;
 	mp4_decoder_config_t *mp4_dec;
 	TS_stream_info *si;
+	int scrambled;
 
 
 	memset(es, 0, sizeof(*es));
@@ -3831,6 +4016,22 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 		}
 		stream_skip(stream, junk);
 
+		// currently SI streams (dp==NULL) are not scrambled in ISDB-T/S.
+		scrambled = (packet[3] & 0xC0);
+#if CONFIG_DEMULTI2
+		if (dp && scrambled && priv->dm2_handle && tss->ecm_pid < 8191)
+		{
+			int ret;
+			ret = demulti2_descramble(priv->dm2_handle, p, buf_size,
+					scrambled, tss->ecm_pid, NULL);
+			if (ret == DEMULTI2_RET_OK) {
+				packet[3] &= 0x3F;
+				scrambled = 0;
+			}
+			mp_msg(MSGT_DEMUX, MSGL_DBG2, "descrambled. ret:%d\n", ret);
+		}
+#endif
+
 		if(pid  == 0)
 		{
 			parse_pat(priv, is_start, p, buf_size);
@@ -3844,6 +4045,23 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 					mp_msg(MSGT_DEMUX, MSGL_INFO, "switching to the PROG:%" PRIu16 "\n", priv->prog);
 				}
 			}
+			continue;
+		}
+/*
+		else if (pid == 1)
+		{
+			parse_cat(priv, is_start, p, buf_size);
+			continue;
+		}
+		else if (pid == priv->emm.pid)
+		{
+			parse_emm(priv, is_start, p, buf_size);
+			continue;
+		}
+ */
+		else if (priv->ts.ecms[pid] != NULL)
+		{
+			parse_ecm(priv, pid, is_start, p, buf_size);
 			continue;
 		}
 		else if (pid == 0x12)
@@ -3894,6 +4112,27 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 
 		if(!probe && !dp)
 			continue;
+
+		if (scrambled)
+		{
+			if (probe)
+			{
+				es->pid = tss->pid;
+				es->type = tss->type;
+				es->subtype = tss->subtype;
+				es->component_tag = tss->component_tag;
+				es->is_dualmono = tss->is_dualmono;
+				memcpy(es->lang, tss->lang, 4);
+				memcpy(es->lang2, tss->lang2, 4);
+				es->prog_idx = tss->prog_idx;
+				es->es_idx = tss->es_idx;
+				return -1;
+			}
+			else
+			{
+				continue;
+			}
+		}
 
 		if(is_start)
 		{
