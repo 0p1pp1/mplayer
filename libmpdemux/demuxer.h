@@ -255,6 +255,11 @@ typedef struct demuxer {
   int type;    // demuxer type: mpeg PS, mpeg ES, avi, avi-ni, avi-nini, asf
   int file_format;  // file format: mpeg/avi/asf
   int seekable;  // flag
+  unsigned int stalled_time;
+      // notify mplayer that the demuxer had stalled for "stalled_time" ms,
+      // waiting for descrambling to start.
+      // also used as a flag to notify the need of refilling the stream cache,
+      // maybe due to the discarded input until desrambling became ready.
   //
   demux_stream_t *audio; // audio buffer/demuxer
   demux_stream_t *video; // video buffer/demuxer

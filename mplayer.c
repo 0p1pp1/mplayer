@@ -1229,6 +1229,8 @@ static void print_status(float a_pos, float a_v, float corr)
 
     // Audio time
     if (mpctx->sh_audio) {
+        if (a_pos == MP_NOPTS_VALUE)
+            a_pos = 0.0;
         saddf(line, &pos, width, "A:%6.1f ", a_pos);
         if (!sh_video) {
             float len = demuxer_get_time_length(mpctx->demuxer);
@@ -1242,7 +1244,8 @@ static void print_status(float a_pos, float a_v, float corr)
 
     // Video time
     if (sh_video)
-        saddf(line, &pos, width, "V:%6.1f ", sh_video->pts);
+        saddf(line, &pos, width, "V:%6.1f ",
+                (sh_video->pts != MP_NOPTS_VALUE) ? sh_video->pts : 0.0);
 
     // A-V sync
     if (mpctx->sh_audio && sh_video)
@@ -1758,8 +1761,12 @@ static double written_audio_pts(sh_audio_t *sh_audio, demux_stream_t *d_audio)
 double playing_audio_pts(sh_audio_t *sh_audio, demux_stream_t *d_audio,
                          const ao_functions_t *audio_out)
 {
-    return written_audio_pts(sh_audio, d_audio) - playback_speed *
-           audio_out->get_delay();
+    float d = audio_out->get_delay();
+
+    if (d == 0.0)
+        return MP_NOPTS_VALUE;
+
+    return written_audio_pts(sh_audio, d_audio) - playback_speed * d;
 }
 
 static int is_at_end(MPContext *mpctx, m_time_size_t *end_at, double pts)
@@ -1776,16 +1783,20 @@ static int check_framedrop(double frame_time)
     // check for frame-drop:
     current_module = "check_framedrop";
     if (mpctx->sh_audio && !mpctx->d_audio->eof) {
-        static int dropped_frames;
+        static double dropped_frames;
         float delay = playback_speed * mpctx->audio_out->get_delay();
         float d     = delay - mpctx->delay;
         ++total_frame_cnt;
+        // if delay == 0.0, ao is in anormal state, so just keep this frame.
         // we should avoid dropping too many frames in sequence unless we
         // are too late. and we allow 100ms A-V delay here:
-        if (d < -dropped_frames * frame_time - 0.100 &&
+        if (delay != 0.0 && d < -dropped_frames - 0.100 &&
             mpctx->osd_function != OSD_PAUSE) {
             ++drop_frame_cnt;
-            ++dropped_frames;
+            // mpctx->delay already took account of the dropped frames, but...
+            dropped_frames += frame_time;
+            mp_msg(MSGT_AVSYNC, MSGL_DBG2, "dropped. ao.d:%g d:%g drpfrms:%g\n",
+                delay, mpctx->delay, dropped_frames);
             return frame_dropping;
         } else
             dropped_frames = 0;
@@ -2171,6 +2182,18 @@ static int fill_audio_out_buffers(void)
 
     current_module = "play_audio";
 
+    if (mpctx->audio_out->get_delay() <= 0.0) {
+        mp_msg(MSGT_AVSYNC, MSGL_V, "got AO delay of 0.0.\n");
+        mpctx->delay = 0.0;
+        mpctx->time_frame = 0.0;
+
+        // HACK to refill the stream cache after this iteration.
+        // as the ao got underrun and became empty,
+        // data to refill the whole ao buffer will be read / consumed burstly,
+        // which decreases the stream cache.
+        mpctx->demuxer->stalled_time = 1;
+    }
+
     while (1) {
         int sleep_time;
         // all the current uses of ao_data.pts seem to be in aos that handle
@@ -2280,6 +2303,9 @@ static int sleep_until_update(float *time_frame, float *aq_sleep_time)
     }
 #endif /* CONFIG_NETWORKING */
 
+    MP_MSG_DBGSYNC("sleep ");
+    // subtract the elapsed time since the output of the previous frame,
+    //  && reset timer for the following timing_sleep()
     *time_frame -= GetRelativeTime(); // reset timer
 
     if (mpctx->sh_audio && !mpctx->d_audio->eof) {
@@ -2302,6 +2328,8 @@ static int sleep_until_update(float *time_frame, float *aq_sleep_time)
         }
 
         *time_frame = delay - mpctx->delay / playback_speed;
+        mp_msg(MSGT_AVSYNC, MSGL_DBG2, "ao.d:%g dly:%g tf:%g ",
+               delay, mpctx->delay, *time_frame);
 
         // delay = amount of audio buffered in soundcard/driver
         if (delay > 0.25)
@@ -2312,7 +2340,8 @@ static int sleep_until_update(float *time_frame, float *aq_sleep_time)
             // sleep time too big - may cause audio drops (buffer underrun)
             frame_time_remaining = 1;
             *time_frame = delay * 0.5;
-        }
+        } else if (*time_frame < -1.0)
+            *time_frame = -1.0; // clip
     } else {
         // If we're lagging more than 200 ms behind the right playback rate,
         // don't try to "catch up".
@@ -2324,6 +2353,8 @@ static int sleep_until_update(float *time_frame, float *aq_sleep_time)
 
     *aq_sleep_time += *time_frame;
 
+    mp_msg(MSGT_AVSYNC, MSGL_DBG2, "slp:%g rem:%d\n",
+        *time_frame, frame_time_remaining);
     //============================== SLEEP: ===================================
 
     // flag 256 means: libvo driver does its timing (dvb card)
@@ -2474,6 +2505,7 @@ static double update_video(int *blit_frame)
     double frame_time;
     int size_changed;
 
+    MP_MSG_DBGSYNC("upd-f ");
     *blit_frame = 0; // Don't blit if we hit EOF
     if (!correct_pts) {
         unsigned char *start = NULL;
@@ -2531,8 +2563,11 @@ static double update_video(int *blit_frame)
             if (flush && !decoded_frame)
                 return -1;
 
+            // even dropped frames should advance the running time as well
+            advance_timer(frame_time);
+
+            mp_msg(MSGT_AVSYNC, MSGL_DBG2, "d:%g/%d ", mpctx->delay, full_frame);
             if (full_frame) {
-                advance_timer(frame_time);
                 // video_read_frame can change fps (e.g. for ASF video)
                 vo_fps = sh_video->fps;
                 update_subtitles(sh_video, sh_video->pts, mpctx->d_sub, 0);
@@ -2785,6 +2820,8 @@ static int seek(MPContext *mpctx, double amount, int style)
         // (which is used by at least vobsub and edl code below) may
         // be completely wrong (probably 0).
         mpctx->sh_video->pts = mpctx->d_video->pts;
+        mpctx->sh_video->i_pts = 0; // for MPEG streams
+        mpctx->sh_video->num_buffered_pts = 0;
         update_subtitles(mpctx->sh_video, mpctx->sh_video->pts, mpctx->d_sub, 1);
         update_teletext(mpctx->sh_video, mpctx->demuxer, 1);
     }
@@ -3691,6 +3728,8 @@ goto_enable_cache:
         term_osd = 0;
 
     {
+        // check_time: for detecting suspend/resume
+        unsigned int check_time = GetTimerMS();
         mpctx->num_buffered_frames = 0;
 
         // Make sure old OSD does not stay around,
@@ -3855,10 +3894,11 @@ goto_enable_cache:
                         // these initial decode failures are probably due to codec delay,
                         // ignore them and also their probably nonsense durations
                         update_video(&blit_frame);
-                        mpctx->delay = delay;
+                        //mpctx->delay = delay;
                         mpctx->startup_decode_retry--;
                     }
                     mpctx->startup_decode_retry = 0;
+                    skip_timing = 0;
                     mp_dbg(MSGT_AVSYNC, MSGL_DBG2, "*** ftime=%5.3f ***\n", frame_time);
                     if (mpctx->sh_video->vf_initialized < 0) {
                         mp_msg(MSGT_CPLAYER, MSGL_FATAL, MSGTR_NotInitializeVOPorVO);
@@ -3994,6 +4034,7 @@ goto_enable_cache:
             if (mpctx->osd_function == OSD_PAUSE) {
                 mpctx->was_paused = 1;
                 pause_loop();
+                check_time = GetTimerMS();
             }
 
             // handle -sstep
@@ -4004,6 +4045,47 @@ goto_enable_cache:
 
             edl_update(mpctx);
 
+//======================== AV sync reset & re-cache ==========================
+            current_module = "sync_reset";
+            {
+                unsigned int diff;
+
+                // check if there's a time jump by suspend/resume.
+                // Timer wrap-around/overflow is cancelled here,
+                // as GetTimerMS(), check_time, diff all have the same sized,
+                // unsigned integer type.
+                diff = GetTimerMS() - check_time;
+
+                // we should not reset ao/vo if just a normal demuxer stall
+                //  (for descrambling) had happened in the last iteration,
+                // which results in a big "diff" value as well.
+                // But suspend/resume (or SIGSTOP/CONT) could have happened
+                // during a demuxer stall.
+                if (mpctx->demuxer->stalled_time > 3000 ||
+                    diff > 3000 + mpctx->demuxer->stalled_time) {
+                    mp_msg(MSGT_AVSYNC, MSGL_INFO, "found a time jump.\n");
+                    // reset ao, vo and the time related parameters
+                    if (mpctx->sh_audio) {
+                        uninit_player(INITIALIZED_AO);
+                        reinit_audio_chain();
+                    }
+                    if (mpctx->sh_video) {
+                        uninit_player(INITIALIZED_VCODEC | INITIALIZED_VO);
+                        reinit_video_chain();
+                    }
+                    mpctx->delay = 0;
+                    mpctx->time_frame = 0;
+                    audio_time_usage   = 0;
+                    video_time_usage   = 0;
+                    vout_time_usage    = 0;
+                }
+
+                if (mpctx->demuxer->stalled_time > 0) {
+                    mpctx->demuxer->stalled_time = 0;
+                }
+                check_time = GetTimerMS();
+                (void)GetRelativeTime();
+            }
 //================= Keyboard events, SEEKing ====================
 
             current_module = "key_events";
