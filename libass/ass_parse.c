@@ -705,14 +705,14 @@ char *parse_tag(ASS_Renderer *render_priv, char *p, double pwr)
         ass_msg(render_priv->library, MSGL_DBG2, "color: %X", val);
         change_color(&render_priv->state.c[0], val, pwr);
         render_priv->state.bm_run_id++;
-    } else if ((*p >= '1') && (*p <= '4') && (++p)
+    } else if ((*p >= '1') && (*p <= '5') && (++p)
                && (mystrcmp(&p, "c") || mystrcmp(&p, "a"))) {
         char n = *(p - 2);
         int cidx = n - '1';
         char cmd = *(p - 1);
         uint32_t val;
         int hex = render_priv->track->track_type == TRACK_TYPE_ASS;
-        assert((n >= '1') && (n <= '4'));
+        assert((n >= '1') && (n <= '5'));
         if (!strtocolor(render_priv->library, &p, &val, hex))
             switch (n) {
             case '1':
@@ -726,6 +726,9 @@ char *parse_tag(ASS_Renderer *render_priv, char *p, double pwr)
                 break;
             case '4':
                 val = render_priv->state.style->BackColour;
+                break;
+            case '5':
+                val = render_priv->state.style->ClippingColour;
                 break;
             default:
                 val = 0;

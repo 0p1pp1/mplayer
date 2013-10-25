@@ -132,6 +132,8 @@ void ass_renderer_done(ASS_Renderer *render_priv)
     free(render_priv->settings.default_font);
     free(render_priv->settings.default_family);
 
+    free(render_priv->clipping_mat);
+
     free_list_clear(render_priv);
     free(render_priv);
 }
@@ -849,6 +851,7 @@ void reset_render_context(ASS_Renderer *render_priv, ASS_Style *style)
     render_priv->state.c[1] = style->SecondaryColour;
     render_priv->state.c[2] = style->OutlineColour;
     render_priv->state.c[3] = style->BackColour;
+    render_priv->state.c[4] = style->ClippingColour;
     render_priv->state.flags =
         (style->Underline ? DECO_UNDERLINE : 0) |
         (style->StrikeOut ? DECO_STRIKETHROUGH : 0);
@@ -2177,6 +2180,46 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
     event_images->shift_direction = (valign == VALIGN_TOP) ? 1 : -1;
     event_images->event = event;
     event_images->imgs = render_text(render_priv, (int) device_x, (int) device_y);
+
+    // add a mat image of clipping area
+    if ((render_priv->state.c[5] & 0xFF) != 0 &&
+        render_priv->state.clip_mode == 0) {
+        ASS_Image *img = malloc(sizeof(ASS_Image));
+
+        if (img) {
+            img->w = render_priv->state.clip_x1 - render_priv->state.clip_x0;
+            img->h = render_priv->state.clip_y1 - render_priv->state.clip_y0;
+            img->stride = img->w;
+            // re-alloc the bitmap if we can't reuse the previous one
+            if (!render_priv->clipping_mat
+                || render_priv->clipping_mat_len < img->w * img->h) {
+                int len = ((img->w * img->h + 1023) >> 10) << 10;
+
+                if (render_priv->clipping_mat)
+                    free(render_priv->clipping_mat);
+                render_priv->clipping_mat_len = len;
+                render_priv->clipping_mat = (len > 0) ? malloc(len) : NULL;
+                if (render_priv->clipping_mat)
+                    memset(render_priv->clipping_mat, 0xff, len);
+                else
+                    render_priv->clipping_mat_len = 0;
+            }
+
+            if (img->w > 0 && img->h > 0 &&
+                (img->bitmap = render_priv->clipping_mat) != NULL) {
+                img->color = render_priv->state.c[4];
+                img->dst_x = render_priv->state.clip_x0;
+                img->dst_y = render_priv->state.clip_y0;
+
+                img->next = event_images->imgs;
+                event_images->imgs = img;
+                ass_msg(render_priv->library, MSGL_DBG2,
+                    "clipping area mat at (%d, %d), size (%d, %d) col:0x%08X",
+                    img->dst_x, img->dst_y, img->w, img->h, img->color);
+            } else
+                free(img);
+        }
+    }
 
     ass_shaper_cleanup(render_priv->shaper, text_info);
     free_render_context(render_priv);
