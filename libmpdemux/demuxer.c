@@ -368,6 +368,7 @@ void free_sh_audio(demuxer_t *demuxer, int id)
     free(sh->wf);
     free(sh->codecdata);
     free(sh->lang);
+    free(sh->lang2);
 #ifdef CONFIG_FFMPEG
     clear_parser((sh_common_t *)sh);
 #endif
@@ -675,7 +676,7 @@ int ds_fill_buffer(demux_stream_t *ds)
             mp_dbg(MSGT_DEMUXER, MSGL_DBG3, "ds_fill_buffer(d_sub) called\n");
         else
             mp_dbg(MSGT_DEMUXER, MSGL_DBG3,
-                   "ds_fill_buffer(unknown 0x%X) called\n", (unsigned int) ds);
+                   "ds_fill_buffer(unknown %p) called\n", ds);
     }
     while (1) {
         int apacks = demux->audio ? demux->audio->packs : 0;
@@ -1838,8 +1839,16 @@ int demuxer_audio_lang(demuxer_t *d, int id, char *buf, int buf_len)
     sh = d->a_streams[id];
     if (!sh)
         return -1;
+    mp_msg(MSGT_DEMUX, MSGL_DBG2, "au lang %s.\n", sh->lang);
     if (sh->lang) {
-        av_strlcpy(buf, sh->lang, buf_len);
+        buf[0] = '\0';
+        if (! sh->lang2 || ! sh->lang2[0] || sh->dualmono_mode != 1)
+            av_strlcpy(buf, sh->lang, buf_len);
+        if (sh->lang2 && sh->lang2[0] && sh->dualmono_mode != 0) {
+            if (buf[0])
+                av_strlcat(buf, "/", buf_len);
+            av_strlcat(buf, sh->lang2, buf_len);
+        }
         return 0;
     }
     req.type = stream_ctrl_audio;
@@ -1876,11 +1885,17 @@ int demuxer_sub_lang(demuxer_t *d, int id, char *buf, int buf_len)
 int demuxer_audio_track_by_lang(demuxer_t *d, char *lang)
 {
     int i, len;
+    int start;
+
     lang += strspn(lang, ",");
     while ((len = strcspn(lang, ",")) > 0) {
+        // demux->open() may have selected a right track. check this first.
+        start = d->audio->id < 0 ? 0 : d->audio->id;
         for (i = 0; i < MAX_A_STREAMS; ++i) {
-            sh_audio_t *sh = d->a_streams[i];
-            if (sh && sh->lang && strncmp(sh->lang, lang, len) == 0)
+            sh_audio_t *sh = d->a_streams[(start + i) % MAX_A_STREAMS];
+            if (sh && sh->lang &&
+                (strncmp(sh->lang, lang, len) == 0 ||
+                 (sh->lang2 && strncmp(sh->lang2, lang, len) == 0)))
                 return sh->aid;
         }
         lang += len;
@@ -1892,10 +1907,14 @@ int demuxer_audio_track_by_lang(demuxer_t *d, char *lang)
 int demuxer_sub_track_by_lang(demuxer_t *d, char *lang)
 {
     int i, len;
+    int start;
+
     lang += strspn(lang, ",");
     while ((len = strcspn(lang, ",")) > 0) {
+        // demux->open() may have selected a right track. check this first.
+        start = d->sub->id < 0 ? 0 : d->sub->id;
         for (i = 0; i < MAX_S_STREAMS; ++i) {
-            sh_sub_t *sh = d->s_streams[i];
+            sh_sub_t *sh = d->s_streams[(start + i) % MAX_S_STREAMS];
             if (sh && sh->lang && strncmp(sh->lang, lang, len) == 0)
                 return sh->sid;
         }
@@ -1908,14 +1927,13 @@ int demuxer_sub_track_by_lang(demuxer_t *d, char *lang)
 int demuxer_default_audio_track(demuxer_t *d)
 {
     int i;
+    int start;
+
+    // demux->open() may have selected a right track. check this first.
+    start = d->audio->id < 0 ? 0 : d->audio->id;
     for (i = 0; i < MAX_A_STREAMS; ++i) {
-        sh_audio_t *sh = d->a_streams[i];
+        sh_audio_t *sh = d->a_streams[(start + i) % MAX_A_STREAMS];
         if (sh && sh->default_track)
-            return sh->aid;
-    }
-    for (i = 0; i < MAX_A_STREAMS; ++i) {
-        sh_audio_t *sh = d->a_streams[i];
-        if (sh)
             return sh->aid;
     }
     return -1;
@@ -1924,8 +1942,12 @@ int demuxer_default_audio_track(demuxer_t *d)
 int demuxer_default_sub_track(demuxer_t *d)
 {
     int i;
+    int start;
+
+    // demux->open() may have selected a right track. check this first.
+    start = d->sub->id < 0 ? 0 : d->sub->id;
     for (i = 0; i < MAX_S_STREAMS; ++i) {
-        sh_sub_t *sh = d->s_streams[i];
+        sh_sub_t *sh = d->s_streams[(start + i) % MAX_S_STREAMS];
         if (sh && sh->default_track)
             return sh->sid;
     }

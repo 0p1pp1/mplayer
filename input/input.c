@@ -145,6 +145,9 @@ static const mp_cmd_t mp_cmds[] = {
   { MP_CMD_SWITCH_ANGLE, "switch_angle", 0, { { MP_CMD_ARG_INT,{-1} }, {-1,{0}} } },
   { MP_CMD_SWITCH_TITLE, "switch_title", 0, { { MP_CMD_ARG_INT,{-1} }, {-1,{0}} } },
   { MP_CMD_SWITCH_DMONO, "switch_dmono", 0, { { MP_CMD_ARG_INT,{-1} }, {-1,{0}} } },
+#ifdef CONFIG_MPEGTS_DEMUXER
+  { MP_CMD_LOWCN, "low_cn", 0, { { MP_CMD_ARG_INT,{-1} }, {-1,{0}} } },
+#endif
 #ifdef CONFIG_TV
   { MP_CMD_TV_START_SCAN, "tv_start_scan", 0,  { {-1,{0}} }},
   { MP_CMD_TV_STEP_CHANNEL, "tv_step_channel", 1,  { { MP_CMD_ARG_INT ,{0}}, {-1,{0}} }},

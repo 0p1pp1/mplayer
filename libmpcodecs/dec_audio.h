@@ -26,6 +26,9 @@ extern af_cfg_t af_cfg;
 
 extern int audio_output_channels;
 extern int fakemono;
+#define DMONO_MAIN 0
+#define DMONO_SUB 1
+#define DMONO_BOTH 2
 extern int dualmono_mode;
 
 // dec_audio.c:

@@ -41,11 +41,19 @@
 #include <dlfcn.h>
 #endif
 
+#ifdef CONFIG_FFMPEG
+#include <libavutil/opt.h>
+#include <libavutil/error.h>
+#endif
+
 #ifdef CONFIG_FAKE_MONO
 int fakemono = 0;
 #endif
-/* default selection for dual-mono mode. 0: main/L, 1: sub/R, 2: both/LR */
-int dualmono_mode = 0;
+/* default preferred selection for dual-mono mode.
+ *    0: main/L, 1: sub/R, 2: both/LR
+ * Note: dmono preference is preceded by alang
+ */
+int dualmono_mode = DMONO_MAIN;
 
 /* used for ac3surround decoder - set using -channels option */
 int audio_output_channels = 2;

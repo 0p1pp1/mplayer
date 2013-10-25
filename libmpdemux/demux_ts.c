@@ -60,10 +60,14 @@
 #define TYPE_VIDEO 2
 #define TYPE_SUB   3
 
+// for indicating a PSI section as not received yet
+#define VERSION_NONE 0x20
+
 int ts_prog;
 int ts_keep_broken=0;
 off_t ts_probe = 0;
 int audio_substream_id = -1;
+int low_cn = 0;
 
 typedef enum
 {
@@ -108,6 +112,13 @@ typedef struct {
 	double pts, last_pts;
 	int pid;
 	char lang[4];
+	// copy from PMT
+	char lang2[4];
+	int is_dualmono;
+	int component_tag;
+	// pointer to PMT
+	int prog_idx;
+	int es_idx;
 	int last_cc;				// last cc code (-1 if first packet)
 	int is_synced;
 	ts_section_t section;
@@ -217,11 +228,16 @@ typedef struct {
 		uint16_t descr_length;
 		uint8_t format_descriptor[5];
 		uint8_t lang[4];
+		uint8_t lang2[4];
+		uint8_t is_dualmono;
 		uint16_t mp4_es_id;
+		int component_tag;
+		uint16_t highCN_pid; // alternative PES for high C/N condition(ISDB-S)
 	} *es;
 	mp4_od_t iod, *od;
 	mp4_es_descr_t *mp4es;
 	int od_cnt, mp4es_cnt;
+	uint8_t eit_version;
 } pmt_t;
 
 typedef struct {
@@ -247,6 +263,7 @@ typedef struct {
 	int last_sid;
 	char packet[TS_FEC_PACKET_SIZE];
 	TS_stream_info vstr, astr;
+	ts_section_t eit_section;
 } ts_priv_t;
 
 
@@ -348,7 +365,28 @@ static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
 	ts_priv_t *priv = (ts_priv_t*) demuxer->priv;
 
 	if(priv->ts.streams[es->pid].sh)
+	{
+		sh_common_t *sh;
+		int ctag;
+
+		ctag = es->component_tag;
+		sh = priv->ts.streams[es->pid].sh;
+		sh->default_track = ctag == 0x00 || ctag == 0x10 || ctag == 0x30;
+
+		if (es->lang[0]) {
+			free(sh->lang);
+			sh->lang = strdup(es->lang);
+		}
+
+		if (es->lang2[0] &&
+		    (IS_AUDIO(es->type) || IS_AUDIO(es->subtype))) {
+			sh_audio_t *sh_audio = (sh_audio_t *) sh;
+
+			free(sh_audio->lang2);
+			sh_audio->lang2 = strdup(es->lang2);
+		}
 		return;
+	}
 
 	if((IS_AUDIO(es->type) || IS_AUDIO(es->subtype)) && priv->last_aid+1 < MAX_A_STREAMS)
 	{
@@ -358,6 +396,11 @@ static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
 			sh->needs_parsing = 1;
 			sh->format = IS_AUDIO(es->type) ? es->type : es->subtype;
 			sh->ds = demuxer->audio;
+			sh->default_track = (es->component_tag == 0x10);
+			if (es->lang[0])
+				sh->lang = strdup(es->lang);
+			if (es->lang2[0])
+				sh->lang2 = strdup(es->lang2);
 
 			priv->ts.streams[es->pid].id = priv->last_aid;
 			priv->ts.streams[es->pid].sh = sh;
@@ -381,6 +424,7 @@ static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
 		{
 			sh->format = IS_VIDEO(es->type) ? es->type : es->subtype;
 			sh->ds = demuxer->video;
+			sh->default_track = (es->component_tag == 0x00);
 
 			priv->ts.streams[es->pid].id = priv->last_vid;
 			priv->ts.streams[es->pid].sh = sh;
@@ -423,6 +467,9 @@ static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
 			case SPU_TELETEXT:
 				sh->type = 'd'; break;
         		}
+			sh->default_track = (es->component_tag == 0x30);
+			if (es->lang[0])
+				sh->lang = strdup(es->lang);
 			priv->ts.streams[es->pid].id = priv->last_sid;
 			priv->ts.streams[es->pid].sh = sh;
 			priv->ts.streams[es->pid].type = TYPE_SUB;
@@ -533,6 +580,22 @@ static int ts_check_file(demuxer_t * demuxer)
 			return 0;
 }
 
+static inline int32_t pid_from_id(ts_priv_t *priv, int id, int type)
+{
+	int i;
+
+	if (id < 0)
+		return -1;
+
+	for (i = 0; i < NB_PID_MAX; i++)
+		if (priv->ts.streams[i].id == id && priv->ts.streams[i].type == type)
+			break;
+
+	if (i == NB_PID_MAX)
+		return -1;
+
+	return i;
+}
 
 static int32_t progid_idx_in_pmt(ts_priv_t *priv, uint16_t progid)
 {
@@ -557,26 +620,29 @@ static int32_t progid_for_pid(ts_priv_t *priv, int pid, int32_t req)		//finds th
 	pmt_t *pmt;
 
 
-	if(priv->pmt == NULL)
+	if(priv->pmt == NULL || pid >= 8192)
 		return -1;
 
+	i = priv->ts.pids[pid]->prog_idx;
+	if (i >= 0) {
+		pmt = &priv->pmt[i];
+		if (pmt && (req <= 0 || req == pmt->progid))
+			return pmt->progid;
+	}
 
 	for(i=0; i < priv->pmt_cnt; i++)
 	{
 		pmt = &(priv->pmt[i]);
 
 		if(pmt->es == NULL)
-			return -1;
+			continue;
+
+		if (req > 0 && req != pmt->progid)
+			continue;
 
 		for(j = 0; j < pmt->es_cnt; j++)
-		{
 			if(pmt->es[j].pid == pid)
-			{
-				if((req == 0) || (req == pmt->progid))
-					return pmt->progid;
-			}
-		}
-
+				return pmt->progid;
 	}
 	return -1;
 }
@@ -596,42 +662,34 @@ static int32_t prog_pcr_pid(ts_priv_t *priv, int progid)
 }
 
 
-static int pid_match_lang(ts_priv_t *priv, uint16_t pid, char *lang)
+static int pes_match_lang(struct pmt_es_t *pes, char *lang)
 {
-	uint16_t i, j;
-	pmt_t *pmt;
+	int len;
 
-	if(priv->pmt == NULL)
-		return -1;
+	if (!pes)
+		return 0;
 
-	for(i=0; i < priv->pmt_cnt; i++)
-	{
-		pmt = &(priv->pmt[i]);
+	mp_msg(MSGT_DEMUXER, MSGL_V, "CMP LANG %s AND %s, pid: %#04x\n",
+		pes->lang, lang, pes->pid);
 
-		if(pmt->es == NULL)
-			return -1;
-
-		for(j = 0; j < pmt->es_cnt; j++)
-		{
-			if(pmt->es[j].pid != pid)
-				continue;
-
-			mp_msg(MSGT_DEMUXER, MSGL_V, "CMP LANG %s AND %s, pids: %d %d\n",pmt->es[j].lang, lang, pmt->es[j].pid, pid);
-			if(strncmp(pmt->es[j].lang, lang, 3) == 0)
-			{
-				return 1;
-			}
-		}
-
+	lang += strspn(lang, ",");
+	while ((len = strcspn(lang, ",")) > 0) {
+		if (! strncmp(pes->lang, lang, len))
+			return 1;
+		if (pes->is_dualmono && ! strncmp(pes->lang2, lang, len))
+			return 2;
+		lang += len;
+		lang += strspn(lang, ",");
 	}
 
-	return -1;
+	return 0;
 }
 
 typedef struct {
 	int32_t atype, vtype, stype;	//types
 	int32_t apid, vpid, spid;	//stream ids
-	char alang[4];	//languages
+	char alang[32];	//languages
+	char slang[32];
 	uint16_t prog;
 	off_t probe;
 } tsdemux_init_t;
@@ -670,6 +728,7 @@ static int a52_check(char *buf, int len)
 static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 {
 	int video_found = 0, audio_found = 0, i, num_packets = 0, req_apid, req_vpid, req_spid;
+	int prog_candidate;
 	int is_audio, is_video, is_sub, has_tables;
 	int32_t p, chosen_pid = 0;
 	off_t pos=0, ret = 0, init_pos, end_pos;
@@ -681,12 +740,18 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 		int pos;
 	} pes_priv1[8192], *pptr;
 	char *tmpbuf;
+	struct pmt_es_t *pes;
+	struct pmt_es_t *vpes, *apes, *spes; // current/last selected PES
+	int dmode;
 
 	priv->last_pid = 8192;		//invalid pid
+	vpes = apes = spes = NULL;
+	dmode = dualmono_mode + 1; // Main/L: 2^0,  Sub/R: 2^1, Both: 2^1 | 2^0
 
 	req_apid = param->apid;
 	req_vpid = param->vpid;
 	req_spid = param->spid;
+	prog_candidate = param->prog;
 
 	has_tables = 0;
 	memset(pes_priv1, 0, sizeof(pes_priv1));
@@ -733,12 +798,23 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 				continue;
 			if(is_audio && req_apid==-2)
 				continue;
+			if(is_video && req_vpid==-2)
+				continue;
+			if(is_sub && req_spid==-2)
+				continue;
+
+			chosen_pid = 0;
+			pes = (es.prog_idx >= 0 && priv->pmt && priv->pmt[es.prog_idx].es_cnt > 0) ?
+				&priv->pmt[es.prog_idx].es[es.es_idx] : NULL;
 
 			if(is_video)
 			{
-    				chosen_pid = (req_vpid == es.pid);
-				if((! chosen_pid) && (req_vpid > 0))
-					continue;
+				if(req_vpid > 0)
+				{
+					chosen_pid = (req_vpid == es.pid);
+					if(! chosen_pid)
+						continue;
+				}
 			}
 			else if(is_audio)
 			{
@@ -748,36 +824,38 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 					if(! chosen_pid)
 						continue;
 				}
-				else if(param->alang[0] > 0 && es.lang[0] > 0)
-				{
-					if(pid_match_lang(priv, es.pid, param->alang) == -1)
-						continue;
-
-					chosen_pid = 1;
-					param->apid = req_apid = es.pid;
-				}
 			}
 			else if(is_sub)
 			{
-				chosen_pid = (req_spid == es.pid);
-				if((! chosen_pid) && (req_spid > 0))
-					continue;
+				if(req_spid > 0)
+				{
+					chosen_pid = (req_spid == es.pid);
+					if(! chosen_pid)
+						continue;
+				}
 			}
 
-			if(req_apid < 0 && (param->alang[0] == 0) && req_vpid < 0 && req_spid < 0)
+			if(param->apid < 0 &&
+			   param->vpid < 0 &&
+			   param->spid < 0 &&
+			   prog_candidate <= 0)
+			{
+				mp_msg(MSGT_IDENTIFY, MSGL_V,
+					"chose the first found pid:0x%04hx.\n", es.pid);
 				chosen_pid = 1;
+			}
 
 			if((ret == 0) && chosen_pid)
 			{
 				ret = stream_tell(demuxer->stream);
 			}
 
-			p = progid_for_pid(priv, es.pid, param->prog);
+			p = progid_for_pid(priv, es.pid, prog_candidate);
 			if(p != -1)
 			{
 				has_tables++;
 				if(!param->prog && chosen_pid)
-					param->prog = p;
+					prog_candidate = p;
 			}
 
 			if((param->prog > 0) && (param->prog != p))
@@ -809,48 +887,206 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 			}
 
 
-			mp_msg(MSGT_DEMUXER, MSGL_DBG2, "TYPE: %x, PID: %d, PROG FOUND: %d\n", es.type, es.pid, param->prog);
+			mp_msg(MSGT_DEMUXER, MSGL_DBG2, "TYPE: %x, PID: %d, PROG FOUND: %d\n", es.type, es.pid, prog_candidate);
 
 
 			if(is_video)
 			{
-				if((req_vpid == -1) || (req_vpid == es.pid))
+				int selected = 0;
+
+				// assert(chosen_pid || req_vpid <= 0)
+				if(chosen_pid) // (req_vpid == es.pid)
+					selected = 1;
+				else { // (req_vpid != es.pid) && (req_vpid <= 0)
+					// vid not specified by user
+					if (!low_cn && pes && pes->highCN_pid != 0)
+						selected = 0;
+					else if (low_cn && vpes && vpes->highCN_pid &&
+					         (!pes || !pes->highCN_pid))
+						selected = 0;
+					else if(param->vpid == -1) {
+						if(prog_candidate == p)
+							selected = 1;
+					} else if(param->vpid == es.pid)
+						selected = 1;
+					else if (p <= 0 || prog_candidate != p || !pes)
+						selected = 0;
+					else if (!vpes)
+						selected = 1;
+					else if (low_cn &&
+					         !vpes->highCN_pid &&
+					         pes->highCN_pid)
+						selected = 1;
+					else if(pes->component_tag < vpes->component_tag)
+						selected = 1;
+				}
+
+				if(selected)
 				{
+					if (param->vpid != es.pid || (pes && !vpes))
+						mp_msg(MSGT_IDENTIFY, MSGL_V,
+							"%svideo found! 0x%04hx tag:0x%02x"
+							" in [0x%04x]\n",
+							(!video_found) ? "New " : "Better ",
+							es.pid, pes ? pes->component_tag : 0xff,
+							prog_candidate);
+
 					param->vtype = IS_VIDEO(es.type) ? es.type : es.subtype;
 					param->vpid = es.pid;
+					vpes = pes;
 					video_found = 1;
+					if(p != -1 && prog_candidate <= 0)
+						prog_candidate = p;
 				}
 			}
 
 
-			if(((req_vpid == -2) || (num_packets >= NUM_CONSECUTIVE_AUDIO_PACKETS)) && audio_found && !param->probe)
-			{
-				//novideo or we have at least 348 audio packets (64 KB) without video (TS with audio only)
-				param->vtype = 0;
-				break;
-			}
-
 			if(is_sub)
 			{
-				if((req_spid == -1) || (req_spid == es.pid))
+				int selected = 0;
+
+				// assert(chosen_pid || req_spid <= 0)
+				if(chosen_pid) // (req_spid == es.pid)
+					selected = 1;
+				else { // (req_spid != es.pid) && (req_spid <= 0)
+					// sid not specified by user
+					if (!low_cn && pes && pes->highCN_pid != 0)
+						selected = 0;
+					else if (low_cn && spes && spes->highCN_pid &&
+					         (!pes || !pes->highCN_pid))
+						selected = 0;
+					else if (param->slang[0] &&
+					         pes_match_lang(spes, param->slang) &&
+					         !pes_match_lang(pes, param->slang))
+						selected = 0;
+					else if(param->spid == -1) {
+						if(prog_candidate == p)
+							selected = 1;
+					} else if(param->spid == es.pid)
+						selected = 1;
+					else if (p <= 0 || prog_candidate != p || !pes)
+						selected = 0;
+					else if (!spes)
+						selected = 1;
+					else if (low_cn &&
+					         !spes->highCN_pid &&
+					         pes->highCN_pid)
+						selected = 1;
+					else if (param->slang[0] &&
+					         !pes_match_lang(spes, param->slang) &&
+					         pes_match_lang(pes, param->slang))
+						selected = 1;
+					else if(pes->component_tag < spes->component_tag)
+						selected = 1;
+				}
+
+				if(selected)
 				{
+					if (param->spid != es.pid || (pes && !spes))
+						mp_msg(MSGT_IDENTIFY, MSGL_V,
+							"sub found! 0x%04hx tag:0x%02x"
+							" in [0x%04x].\n",
+							es.pid, pes ? pes->component_tag : 0xff,
+							prog_candidate);
+
 					param->stype = es.type;
 					param->spid = es.pid;
+					spes = pes;
+					if(p != -1 && prog_candidate <= 0)
+						prog_candidate = p;
 				}
 			}
 
 			if(is_audio)
 			{
-				if((req_apid == -1) || (req_apid == es.pid))
+				int selected = 0;
+
+				// assert(chosen_pid || req_apid <= 0)
+				if(chosen_pid) // (req_apid == es.pid)
+					selected = 1;
+				else { // (req_apid != es.pid) && (req_apid <= 0)
+					// aid not specified by user
+					if (!low_cn && pes && pes->highCN_pid != 0)
+						selected = 0;
+					else if (low_cn && apes && apes->highCN_pid &&
+					         (!pes || !pes->highCN_pid))
+						selected = 0;
+					else if (param->alang[0] &&
+					         pes_match_lang(apes, param->alang) &&
+					         !pes_match_lang(pes, param->alang))
+						selected = 0;
+					else if (param->alang[0] && pes && pes->is_dualmono &&
+					         pes_match_lang(apes, param->alang) & dmode &&
+					         !(pes_match_lang(pes, param->alang) & dmode))
+						selected = 0;
+					else if(param->apid == -1) {
+						if(prog_candidate == p)
+							selected = 1;
+					} else if(param->apid == es.pid)
+						selected = 1;
+					else if (p <= 0 || prog_candidate != p || !pes)
+						selected = 0;
+					else if (!apes)
+						selected = 1;
+					else if (low_cn &&
+					         !apes->highCN_pid &&
+					         pes->highCN_pid)
+						selected = 1;
+					else if (param->alang[0] &&
+					         !pes_match_lang(apes, param->alang) &&
+					         pes_match_lang(pes, param->alang))
+						selected = 1;
+					else if(pes->component_tag < apes->component_tag)
+						selected = 1;
+					else if(param->alang[0] && apes->is_dualmono &&
+					        !(pes_match_lang(apes, param->alang) & dmode) &&
+					        (pes_match_lang(pes, param->alang) & dmode))
+						selected = 1;
+				}
+
+				if(selected)
 				{
+					if (param->apid != es.pid || (pes && !apes)) {
+						int t;
+						char *l1, *l2, *sep;
+
+						if (pes) {
+							t = pes->component_tag;
+							l1 = pes->lang;
+							l2 = pes->lang2;
+							sep = *l2 ? "/" : "";
+						} else {
+							t = 0xff;
+							l1 = l2 = sep = "";
+						}
+
+						mp_msg(MSGT_IDENTIFY, MSGL_V,
+							"%saudio found! 0x%04hx tag:0x%02x"
+							" lang:%.3s%s%.3s in [0x%04x].\n",
+							(!audio_found) ? "New " : "Better ",
+							es.pid, t, l1, sep, l2,
+							prog_candidate);
+					}
+
 					param->atype = IS_AUDIO(es.type) ? es.type : es.subtype;
 					param->apid = es.pid;
+					apes = pes;
 					audio_found = 1;
+					if(p != -1 && prog_candidate <= 0)
+						prog_candidate = p;
 				}
 			}
 
-			if(audio_found && (param->apid == es.pid) && (! video_found))
+			if(audio_found && (param->apid == es.pid) && (! video_found)) {
 				num_packets++;
+				if(num_packets >= NUM_CONSECUTIVE_AUDIO_PACKETS &&
+				   !param->probe) {
+					//novideo or we have at least 348 audio packets
+					//(64 KB) without video (TS with audio only)
+					param->vtype = 0;
+					break;
+				}
+			}
 
 			if((has_tables==0) && (video_found && audio_found) && (pos >= 1000000))
 				break;
@@ -1018,6 +1254,7 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 	priv->pat.progs_cnt = 0;
 	priv->pat.section.buffer = NULL;
 	priv->pat.section.buffer_len = 0;
+	priv->pat.version_number = VERSION_NONE;
 
 	priv->pmt = NULL;
 	priv->pmt_cnt = 0;
@@ -1034,6 +1271,9 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 		demuxer->seekable = 1;
 
 
+	// As initial ds->id values were set as PID,
+	//  (by demux_open(), from -vid/-aid ...),
+	// convert them into the index of demuxer->{a-,v-,s-}streams[].
 	params.atype = params.vtype = params.stype = UNKNOWN;
 	params.apid = demuxer->audio->id;
 	params.vpid = demuxer->video->id;
@@ -1043,11 +1283,19 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 
 	if(audio_lang != NULL)
 	{
-		strncpy(params.alang, audio_lang, 3);
-		params.alang[3] = 0;
+		strncpy(params.alang, audio_lang, sizeof(params.alang) - 1);
+		params.alang[sizeof(params.alang) - 1] = 0;
 	}
 	else
-		memset(params.alang, 0, 4);
+		memset(params.alang, 0, sizeof(params.alang));
+
+	if(dvdsub_lang != NULL)
+	{
+		strncpy(params.slang, dvdsub_lang, sizeof(params.slang) - 1);
+		params.slang[sizeof(params.slang) - 1] = 0;
+	}
+	else
+		memset(params.slang, 0, sizeof(params.slang));
 
 	start_pos = ts_detect_streams(demuxer, &params);
 
@@ -1063,6 +1311,10 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 		sh_video->format = params.vtype;
 		demuxer->video->sh = sh_video;
 	}
+	else {
+		demuxer->video->id = -2;
+		demuxer->video->sh = NULL;
+	}
 
 	if(params.atype != UNKNOWN)
 	{
@@ -1075,8 +1327,28 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 		sh_audio->ds = demuxer->audio;
 		sh_audio->format = params.atype;
 		demuxer->audio->sh = sh_audio;
+		//change dmono mode if necessary
+		if (params.alang[0] &&
+		    es->prog_idx >= 0 && priv->pmt &&
+		    priv->pmt[es->prog_idx].es[es->es_idx].is_dualmono) {
+			if (dualmono_mode == 0)
+				dualmono_mode = strncmp(params.alang, sh_audio->lang, 3) &&
+						!strncmp(params.alang, sh_audio->lang2, 3);
+			else if (dualmono_mode == 1)
+				dualmono_mode = strncmp(params.alang, sh_audio->lang, 3) ||
+						!strncmp(params.alang, sh_audio->lang2, 3);
+			sh_audio->dualmono_mode = dualmono_mode;
+		}
+	}
+	else {
+		demuxer->audio->id = -2;
+		demuxer->audio->sh = NULL;
 	}
 
+	if (params.stype == UNKNOWN) {
+		demuxer->sub->id = -2;
+		demuxer->sub->sh = NULL;
+	}
 
 	mp_msg(MSGT_DEMUXER,MSGL_V, "Opened TS demuxer, audio: %x(pid %d), video: %x(pid %d)...POS=%"PRIu64", PROBE=%"PRIu64"\n", params.atype, demuxer->audio->id, params.vtype, demuxer->video->id, (uint64_t) start_pos, ts_probe);
 
@@ -1122,6 +1394,7 @@ static void demux_close_ts(demuxer_t * demuxer)
 	{
 		free(priv->pat.section.buffer);
 		free(priv->pat.progs);
+		free(priv->eit_section.buffer);
 
 		if(priv->pmt)
 		{
@@ -1134,6 +1407,8 @@ static void demux_close_ts(demuxer_t * demuxer)
 		}
 		for (i = 0; i < NB_PID_MAX; i++)
 		{
+			if (priv->ts.pids[i])
+				free(priv->ts.pids[i]->section.buffer);
 			free(priv->ts.pids[i]);
 			priv->ts.pids[i] = NULL;
 		}
@@ -1704,6 +1979,42 @@ static int32_t prog_id_in_pat(ts_priv_t *priv, uint16_t pid)
 	return -1;
 }
 
+// support multi sections in a TS packet (as in EIT)
+static int next_section(ts_section_t *section)
+{
+	int skip, skip2;
+	int tlen;
+	uint8_t *buf;
+	int buflen;
+
+	buf = section->buffer;
+	buflen = section->buffer_len;
+
+	if (buflen < 4)
+		return 0;
+
+	skip = buf[0];
+	if (buflen < skip + 4)
+		return 0;
+
+	tlen = (buf[skip + 2] & 0x0f) << 8 | buf[skip + 3];
+	skip2 = 1 + skip + 3 + tlen;
+
+	if (buflen < skip2 + 1)
+		return 0;
+
+	if (buf[skip2] == 0xff) {
+		section->buffer_len = 0;
+		return 0;
+	}
+
+	memmove(buf + 1, buf + skip2, buflen - skip2);
+	buf[0] = 0;
+	section->buffer_len = 1 + buflen - skip2;
+	return section->buffer_len >= 4 &&
+		section->buffer_len >= ((buf[2] << 0x0f) << 8 | buf[3]) + 4;
+}
+
 static int collect_section(ts_section_t *section, int is_start, unsigned char *buff, int size)
 {
 	uint8_t *ptr;
@@ -1713,6 +2024,19 @@ static int collect_section(ts_section_t *section, int is_start, unsigned char *b
 	mp_msg(MSGT_DEMUX, MSGL_V, "COLLECT_SECTION, start: %d, size: %d, collected: %d\n", is_start, size, section->buffer_len);
 	if(! is_start && !section->buffer_len)
 		return 0;
+
+	// support section tail concatenation in non-0 pointer case
+	if (is_start && buff[0] > 0 && size > buff[0] && section->buffer_len > 0) {
+		skip = section->buffer[0];
+		tlen = (section->buffer[skip + 2] & 0x0f) << 8 |
+			section->buffer[skip + 3];
+
+		if (section->buffer_len + buff[0] == 1 + skip + 3 + tlen) {
+			is_start = 0;
+			buff++;
+			size--;
+		}
+	}
 
 	if(is_start)
 	{
@@ -1738,11 +2062,17 @@ static int collect_section(ts_section_t *section, int is_start, unsigned char *b
 		return 0;
 
 	skip = section->buffer[0];
-	if(skip + 4 > section->buffer_len)
+	if(skip + 2 > section->buffer_len)
 		return 0;
 
 	ptr = &(section->buffer[skip + 1]);
 	tid = ptr[0];
+	if (tid == 0xff) {
+		section->buffer_len = 0;
+		return 0;
+	} else if (skip + 4 > section->buffer_len)
+		return 0;
+
 	tlen = ((ptr[1] & 0x0f) << 8) | ptr[2];
 	mp_msg(MSGT_DEMUX, MSGL_V, "SKIP: %d+1, TID: %d, TLEN: %d, COLLECTED: %d\n", skip, tid, tlen, section->buffer_len);
 	if(section->buffer_len < (skip+1+3+tlen))
@@ -2257,6 +2587,9 @@ static ES_stream_t *new_pid(ts_priv_t *priv, int pid)
 	tss->is_synced = 0;
 	tss->extradata = NULL;
 	tss->extradata_alloc = tss->extradata_len = 0;
+	tss->component_tag = -1;
+	tss->prog_idx = -1;
+	tss->es_idx = -1;
 	priv->ts.pids[pid] = tss;
 
 	return tss;
@@ -2267,7 +2600,7 @@ static int parse_program_descriptors(pmt_t *pmt, uint8_t *buf, uint16_t len)
 {
 	uint16_t i = 0, k, olen = len;
 
-	while(len > 0)
+	while(len >= 2)
 	{
 		mp_msg(MSGT_DEMUX, MSGL_V, "PROG DESCR, TAG=%x, LEN=%d(%x)\n", buf[i], buf[i+1], buf[i+1]);
 		if(buf[i+1] > len-2)
@@ -2286,6 +2619,7 @@ static int parse_program_descriptors(pmt_t *pmt, uint8_t *buf, uint16_t len)
 		}
 
 		len -= 2 + buf[i+1];
+		i += 2 + buf[i+1];
 	}
 
 	return olen;
@@ -2423,6 +2757,20 @@ static int parse_descriptors(struct pmt_es_t *es, uint8_t *ptr)
 			es->mp4_es_id = (ptr[j+2] << 8) | ptr[j+3];
 			mp_msg(MSGT_DEMUX, MSGL_V, "SL Descriptor: ES_ID: %d(%x), pid: %d\n", es->mp4_es_id, es->mp4_es_id, es->pid);
 		}
+		else if(ptr[j] == 0x52)	// Stream Identifier
+		{
+			es->component_tag = ptr[j+2];
+			mp_msg(MSGT_DEMUX, MSGL_DBG2, "ES tag found.(tag:0x%02x)\n",
+				es->component_tag);
+		}
+		else if(ptr[j] == 0xC0) // hierarchical transmission descriptor
+		{
+			uint16_t refpid;
+
+			refpid = (ptr[j + 3] & 0x1f) << 8 | ptr[j + 4];
+			if (refpid != 0x1fff && ! (ptr[j+2] & 0x01))
+				es->highCN_pid = refpid;
+		}
 		else
 			mp_msg(MSGT_DEMUX, MSGL_DBG2, "Unknown descriptor 0x%x, SKIPPING\n", ptr[j]);
 
@@ -2460,6 +2808,155 @@ static int parse_sl_section(pmt_t *pmt, ts_section_t *section, int is_start, uns
 	return 1;
 }
 
+static void parse_acomp(ts_priv_t * priv, pmt_t * pmt, unsigned char *buf)
+{
+	int len;
+	uint8_t component_tag;
+	int multi_lingual;
+	int is_dualmono;
+	char *lang1, *lang2;
+	int i;
+	sh_audio_t *sh_audio;
+	ES_stream_t *tss;
+
+	len = buf[1] + 2;
+	is_dualmono = (buf[3] == 0x02);
+	multi_lingual = !!(buf[7] & 0x80);
+	if (len < 11 || (multi_lingual && len < 14)) {
+		mp_msg(MSGT_DEMUX, MSGL_WARN,
+			"PARSE_EIT: broken Audio Component descriptor.\n");
+		return;
+	}
+
+	component_tag = buf[4];
+	lang1 = (char *) &buf[8];
+	lang2 = (char *) &buf[11];
+	if (component_tag < 0x10 || lang1[0] == 0)
+		return;
+	mp_msg(MSGT_DEMUX, MSGL_V, "PARSE_EIT: AudioComponet Desc. "
+		"tag:0x%02hhx(%.3s%s%.3s)...", component_tag, lang1,
+		(is_dualmono ? "/" : ""),  (multi_lingual ? lang2 : ""));
+
+	for (i = 0; i < pmt->es_cnt; i++) {
+		if (pmt->es[i].component_tag != component_tag)
+			continue;
+
+		mp_msg(MSGT_DEMUX, MSGL_V, "pid:0x%04x", pmt->es[i].pid);
+
+		pmt->es[i].is_dualmono = is_dualmono;
+		memcpy(pmt->es[i].lang, lang1, 3);
+		pmt->es[i].lang[3] = 0;
+		if (multi_lingual) {
+			memcpy(pmt->es[i].lang2, lang2, 3);
+			pmt->es[i].lang2[3] = 0;
+		} else if (is_dualmono) {
+			memcpy(pmt->es[i].lang2, lang1, 3);
+			pmt->es[i].lang2[3] = 0;
+		} else
+			pmt->es[i].lang2[0] = 0;
+
+		// copy the info to priv->ts.pids[] & sh_audio
+		tss = priv->ts.pids[pmt->es[i].pid];
+		if (tss) {
+			tss->component_tag = component_tag;
+			tss->is_dualmono = is_dualmono;
+			memcpy(tss->lang, pmt->es[i].lang, 4);
+			memcpy(tss->lang2, pmt->es[i].lang2, 4);
+		}
+		sh_audio = priv->ts.streams[pmt->es[i].pid].sh;
+		if (sh_audio) {
+			free(sh_audio->lang);
+			sh_audio->lang = NULL;
+			free(sh_audio->lang2);
+			sh_audio->lang2 = NULL;
+
+			if (tss->lang[0])
+				sh_audio->lang = strdup(tss->lang);
+			if (tss->lang2[0])
+				sh_audio->lang2 = strdup(tss->lang2);
+		}
+		break;
+	}
+	mp_msg(MSGT_DEMUX, MSGL_V, "\n");
+	return;
+}
+
+
+// parse EIT to set audio language
+static int parse_eit(ts_priv_t * priv, int is_start, unsigned char *buff, int size)
+{
+	int skip;
+	unsigned char *base;
+	int len, dlen;
+	int idx;
+	uint8_t ver;
+	pmt_t *pmt;
+	uint16_t progid;
+
+	// TODO: store the EIT if its corresponding PMT is not received yet,
+	//       and update  sh_audio->lang in parse_pmt() / ts_add_stream()
+
+	skip = collect_section(&priv->eit_section, is_start, buff, size);
+	if(! skip)
+		return 0;
+
+	if (!priv->pmt || !priv->pmt_cnt)
+		return 0;
+	base = &(priv->eit_section.buffer[skip]);
+	if (base[0] != 0x4e) // only EIT_p/f for the TS is required
+		return 0;
+	len = ((base[1] & 0x0f) << 8) | base[2];
+
+	if (len < 15)  {
+		mp_msg(MSGT_DEMUX, MSGL_WARN,
+			"PARSE_EIT: too short section(%d bytes)\n", len + 3);
+		return -1;
+	}
+
+	// just process current, sec:0 (present) with at least 1 event
+	if (!(base[5] & 0x01) || base[6])
+		return 0;
+	progid = (base[3] << 8) | base[4];
+	idx = progid_idx_in_pmt(priv, progid);
+	if (idx < 0)	// PMT not ready yet.
+		return 0;
+
+	ver = (base[5] >> 1) & 0x1f;
+	mp_msg(MSGT_DEMUX, MSGL_V,
+		"EIT for prog:%hu(%#.4hx) ver:%#.2hhx.\n", progid, progid, ver);
+
+	pmt = &(priv->pmt[idx]);
+	if (ver == pmt->eit_version) // already processed
+		return 0;
+
+	if (len < 27)  {
+		mp_msg(MSGT_DEMUX, MSGL_WARN,
+			"PARSE_EIT: too short section(%d bytes)\n", len + 3);
+		return -1;
+	}
+
+	base += 14;	// base: beggining of the event loop
+	dlen = (base[10] & 0x0f) << 8 | base[11];
+	if (14 + 12 + dlen + 4 > len + 3) {
+		mp_msg(MSGT_DEMUX, MSGL_WARN,
+			"PARSE_EIT: broken section(total:%dB, desc:%dB)\n",
+			len + 3, dlen);
+		return -1;
+	}
+	base += 12;	// base: 1st byte of the descriptors
+	pmt->eit_version = ver;
+
+	while (dlen >= 2) {
+		if (base[1] + 2 > dlen)
+			break;
+		if (base[0] == 0xC4)
+			parse_acomp(priv, pmt, base);
+		dlen -= base[1] + 2;
+		base += base[1] + 2;
+	}
+	return 0;
+}
+
 static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_start, unsigned char *buff, int size)
 {
 	unsigned char *base, *es_base;
@@ -2470,6 +2967,8 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 	ts_section_t *section;
 	ES_stream_t *tss;
 	int i;
+	uint8_t ver;
+	int pidx;
 
 	idx = progid_idx_in_pmt(priv, progid);
 
@@ -2487,6 +2986,8 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 		memset(&(priv->pmt[idx]), 0, sizeof(pmt_t));
 		priv->pmt_cnt++;
 		priv->pmt[idx].progid = progid;
+		priv->pmt[idx].version_number = VERSION_NONE;
+		priv->pmt[idx].eit_version = VERSION_NONE;
 	}
 
 	pmt = &(priv->pmt[idx]);
@@ -2527,7 +3028,10 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 
 	pmt->ssi = base[1] & 0x80;
 	pmt->section_length = (((base[1] & 0xf) << 8 ) | base[2]);
-	pmt->version_number = (base[5] >> 1) & 0x1f;
+	ver = (base[5] >> 1) & 0x1f;
+	if (ver == pmt->version_number)
+		return 0;
+	pmt->version_number = ver;
 	pmt->curr_next = (base[5] & 1);
 	pmt->section_number = base[6];
 	pmt->last_section_number = base[7];
@@ -2547,6 +3051,7 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 	section_bytes= pmt->section_length - 13 - pmt->prog_descr_length;
 	es_count  = 0;
 
+	pidx = idx;	// because idx is reused by the following while() block
 	while(section_bytes >= 5)
 	{
 		int es_pid, es_type;
@@ -2567,6 +3072,7 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 			}
 			idx = pmt->es_cnt;
 			memset(&(pmt->es[idx]), 0, sizeof(struct pmt_es_t));
+			pmt->es[idx].component_tag = -1;
 			pmt->es_cnt++;
 		}
 
@@ -2587,6 +3093,9 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 		else
 			pmt->es[idx].type = es_type;
 
+		pmt->es[idx].component_tag = -1;
+		pmt->es[idx].lang[0] = 0;
+		pmt->es[idx].highCN_pid = 0;
 		parse_descriptors(&pmt->es[idx], &es_base[5]);
 
 		switch(es_type)
@@ -2655,10 +3164,30 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 
 		tss = priv->ts.pids[es_pid];			//an ES stream
 		if(tss == NULL)
-		{
 			tss = new_pid(priv, es_pid);
-			if(tss)
-				tss->type = pmt->es[idx].type;
+		if (tss)
+		{
+			sh_common_t *sh = priv->ts.streams[es_pid].sh;
+			int ctag = pmt->es[idx].component_tag;
+
+			// copy PES info to priv->ts.pids[] and sh
+			tss->type = pmt->es[idx].type;
+			tss->component_tag = ctag;
+			// PES's can be shared amoung programs
+			if (tss->prog_idx < 0 || progid == priv->prog) {
+				tss->prog_idx = pidx;
+				tss->es_idx = idx;
+			}
+			memcpy(tss->lang, pmt->es[idx].lang, 4);
+
+			// and copy some of them to sh
+			if (!IS_VIDEO(tss->type) && tss->type != UNKNOWN &&
+			    sh != NULL && pmt->es[idx].lang[0])
+				sh->lang = strdup(pmt->es[idx].lang);
+
+			if (sh != NULL)
+				sh->default_track =
+					(ctag == 0 || ctag == 0x10 || ctag == 0x30);
 		}
 
 		section_bytes -= 5 + pmt->es[idx].descr_length;
@@ -2679,37 +3208,28 @@ static pmt_t* pmt_of_pid(ts_priv_t *priv, int pid, mp4_decoder_config_t **mp4_de
 {
 	int32_t i, j, k;
 
-	if(priv->pmt)
-	{
-		for(i = 0; i < priv->pmt_cnt; i++)
-		{
-			if(priv->pmt[i].es && priv->pmt[i].es_cnt)
-			{
-				for(j = 0; j < priv->pmt[i].es_cnt; j++)
-				{
-					if(priv->pmt[i].es[j].pid == pid)
-					{
-						//search mp4_es_id
-						if(priv->pmt[i].es[j].mp4_es_id)
-						{
-							for(k = 0; k < priv->pmt[i].mp4es_cnt; k++)
-							{
-								if(priv->pmt[i].mp4es[k].id == priv->pmt[i].es[j].mp4_es_id)
-								{
-									*mp4_dec = &(priv->pmt[i].mp4es[k].decoder);
-									break;
-								}
-							}
-						}
+	if (pid >= 8192 || !priv->pmt || !priv->ts.pids[pid])
+		return NULL;
 
-						return &(priv->pmt[i]);
-					}
-				}
+	i = priv->ts.pids[pid]->prog_idx;
+	j = priv->ts.pids[pid]->es_idx;
+	if (i < 0 || i >= priv->pmt_cnt || j < 0)
+		return NULL;
+
+	//search mp4_es_id
+	if(priv->pmt[i].es && j < priv->pmt[i].es_cnt &&
+	   priv->pmt[i].es[j].mp4_es_id)
+	{
+		for(k = 0; k < priv->pmt[i].mp4es_cnt; k++)
+		{
+			if(priv->pmt[i].mp4es[k].id == priv->pmt[i].es[j].mp4_es_id)
+			{
+				*mp4_dec = &(priv->pmt[i].mp4es[k].decoder);
+				break;
 			}
 		}
 	}
-
-	return NULL;
+	return &(priv->pmt[i]);
 }
 
 
@@ -2742,15 +3262,18 @@ static int32_t pid_type_from_pmt(ts_priv_t *priv, int pid)
 
 static uint8_t *pid_lang_from_pmt(ts_priv_t *priv, int pid)
 {
-	int32_t pmt_idx, pid_idx, i, j;
+	int32_t i, j;
 
-	pmt_idx = progid_idx_in_pmt(priv, priv->prog);
+	if (! priv->pmt)
+		return NULL;
 
-	if(pmt_idx != -1)
+	i = priv->ts.pids[pid]->prog_idx;
+
+	if(i >= 0)
 	{
-		pid_idx = es_pid_in_pmt(&(priv->pmt[pmt_idx]), pid);
-		if(pid_idx != -1)
-			return priv->pmt[pmt_idx].es[pid_idx].lang;
+		j = priv->ts.pids[pid]->es_idx;
+		if(priv->pmt[i].es)
+			return priv->pmt[i].es[j].lang;
 	}
 	else
 	{
@@ -2833,6 +3356,107 @@ static int fill_extradata(mp4_decoder_config_t * mp4_dec, ES_stream_t *tss)
 	mp_msg(MSGT_DEMUX, MSGL_V, "EXTRADATA: %p, alloc=%d, len=%d\n", tss->extradata, tss->extradata_alloc, tss->extradata_len);
 
 	return tss->extradata_len;
+}
+
+static void reset_fifos(demuxer_t *demuxer, int v, int a, int s);
+
+static void
+select_pes_in_pmt(demuxer_t *demuxer, pmt_t *pmt, int lowcn, demux_program_t *prog);
+
+static void reselect_streams(demuxer_t *demuxer)
+{
+	ts_priv_t *priv = (ts_priv_t *)demuxer->priv;
+	int pidx;
+	demux_program_t prog;
+
+	int prev_apid, prev_vpid, prev_spid;
+	int pid;
+
+	mp_msg(MSGT_DEMUX, MSGL_INFO, "PMT info changed. re-selecting streams\n");
+	if (priv->prog == 0) {
+		mp_msg(MSGT_DEMUX, MSGL_ERR, "no PMT selected.\n");
+		return;
+	}
+	pidx = progid_idx_in_pmt(priv, priv->prog);
+	if (pidx < 0) {
+		mp_msg(MSGT_DEMUX, MSGL_ERR,
+			"PMT info for id:%d not found.\n", priv->prog);
+		return;
+	}
+	select_pes_in_pmt(demuxer, &priv->pmt[pidx], low_cn, &prog);
+
+	if (demuxer->audio->id >= 0) {
+		prev_apid = pid_from_id(priv, demuxer->audio->id, TYPE_AUDIO);
+		if (prev_apid < 0)
+			mp_msg(MSGT_DEMUX, MSGL_ERR, "broken internal table...\n");
+	} else
+		prev_apid = -1;
+
+	if (demuxer->video->id >= 0) {
+		prev_vpid = pid_from_id(priv, demuxer->video->id, TYPE_VIDEO);
+		if (prev_vpid < 0)
+			mp_msg(MSGT_DEMUX, MSGL_ERR, "broken internal table...\n");
+	} else
+		prev_vpid = -1;
+
+	if (demuxer->sub->id >= 0) {
+		prev_spid = pid_from_id(priv, demuxer->sub->id, TYPE_SUB);
+		if (prev_spid < 0)
+			mp_msg(MSGT_DEMUX, MSGL_ERR, "broken internal table...\n");
+	} else
+		prev_spid = -1;
+
+
+	if (prev_apid >= 0 && prev_apid != prog.aid) {
+		reset_fifos(demuxer, 1, 0, 0);
+		pid = prog.aid;
+		if (pid < 0) {
+			mp_msg(MSGT_DEMUX, MSGL_INFO, "no audio found in prog:%d\n", priv->prog);
+			demuxer->audio->id = -1;
+		} else {
+			ts_add_stream(demuxer, priv->ts.pids[pid]);
+			demuxer->audio->id = priv->ts.streams[pid].id;
+			demuxer->audio->sh = priv->ts.streams[pid].sh;
+			ds_free_packs(demuxer->audio);
+
+			mp_msg(MSGT_DEMUX, MSGL_INFO, "audio stream pid: %#04hx -> %#04hx\n",
+				prev_apid, pid);
+		}
+	}
+
+	if (prev_vpid >= 0 && prev_vpid != prog.vid) {
+		reset_fifos(demuxer, 0, 1, 0);
+		pid = prog.vid;
+		if (pid < 0) {
+			mp_msg(MSGT_DEMUX, MSGL_INFO, "no video found in prog:%d\n", priv->prog);
+			demuxer->video->id = -1;
+		} else {
+			ts_add_stream(demuxer, priv->ts.pids[pid]);
+			demuxer->video->id = priv->ts.streams[pid].id;
+			demuxer->video->sh = priv->ts.streams[pid].sh;
+			ds_free_packs(demuxer->video);
+
+			mp_msg(MSGT_DEMUX, MSGL_INFO, "video stream pid: %#04hx -> %#04hx(%d)\n",
+				prev_vpid, pid, priv->ts.streams[pid].id);
+		}
+	}
+
+	if (prev_spid >= 0 && prev_spid != prog.sid) {
+		reset_fifos(demuxer, 0, 0, 1);
+		pid = prog.sid;
+		if (pid < 0) {
+			mp_msg(MSGT_DEMUX, MSGL_INFO, "no sub found in prog:%d\n", priv->prog);
+			demuxer->sub->id = -1;
+		} else {
+			ts_add_stream(demuxer, priv->ts.pids[pid]);
+			demuxer->sub->id = priv->ts.streams[pid].id;
+			demuxer->sub->sh = priv->ts.streams[pid].sh;
+			ds_free_packs(demuxer->sub);
+
+			mp_msg(MSGT_DEMUX, MSGL_INFO, "subpic stream pid: %#04hx -> %#04hx\n",
+				prev_spid, pid);
+		}
+	}
 }
 
 static void reset_es(ts_priv_t *priv, int pid)
@@ -2937,7 +3561,7 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 		rap_flag = 0;
 		mp4_dec = NULL;
 		es->is_synced = 0;
-		es->lang[0] = 0;
+		es->prog_idx = -1;
 		si = NULL;
 
 		junk = priv->ts.packet_size - TS_PACKET_SIZE;
@@ -3204,6 +3828,13 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 			}
 			continue;
 		}
+		else if (pid == 0x12)
+		{
+			parse_eit(priv, is_start, p, buf_size);
+			while (next_section(&priv->eit_section) > 0)
+				parse_eit(priv, 0, p, 0);
+			continue;
+		}
 		else if((tss->type == SL_SECTION) && pmt)
 		{
 			int k, mp4_es_id = -1;
@@ -3231,7 +3862,11 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 			{
 				if(pid != demuxer->video->id && pid != demuxer->audio->id && pid != demuxer->sub->id)
 				{
-					parse_pmt(priv, progid, pid, is_start, &packet[base], buf_size);
+					int ret;
+
+					ret = parse_pmt(priv, progid, pid, is_start, &packet[base], buf_size);
+					if(!probe && progid == (signed) priv->prog && ret > 0)
+						reselect_streams(demuxer);
 					continue;
 				}
 				else
@@ -3244,8 +3879,6 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 
 		if(is_start)
 		{
-			uint8_t *lang = NULL;
-
 			mp_msg(MSGT_DEMUX, MSGL_DBG2, "IS_START\n");
 
 			len = pes_parse2(p, buf_size, es, pid_type, pmt, pid);
@@ -3255,16 +3888,14 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 				continue;
 			}
 			es->pid = tss->pid;
+			es->component_tag = tss->component_tag;
+			es->is_dualmono = tss->is_dualmono;
+			memcpy(es->lang, tss->lang, 4);
+			memcpy(es->lang2, tss->lang2, 4);
+			es->prog_idx = tss->prog_idx;
+			es->es_idx = tss->es_idx;
 			tss->is_synced |= es->is_synced || rap_flag;
 			tss->payload_size = es->payload_size;
-
-			if((is_sub || is_audio) && (lang = pid_lang_from_pmt(priv, es->pid)))
-			{
-				memcpy(es->lang, lang, 3);
-				es->lang[3] = 0;
-			}
-			else
-				es->lang[0] = 0;
 
 			if(probe)
 			{
@@ -3316,7 +3947,12 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 			es->subtype = tss->subtype;
 			es->pts = tss->pts = tss->last_pts;
 			es->start = &packet[base];
-
+			es->component_tag = tss->component_tag;
+			es->is_dualmono = tss->is_dualmono;
+			memcpy(es->lang, tss->lang, 4);
+			memcpy(es->lang2, tss->lang2, 4);
+			es->prog_idx = tss->prog_idx;
+			es->es_idx = tss->es_idx;
 
 			if(tss->payload_size > 0)
 			{
@@ -3531,9 +4167,100 @@ static int is_usable_program(ts_priv_t *priv, pmt_t *pmt)
 	return 0;
 }
 
+static void
+select_pes_in_pmt(demuxer_t *demuxer, pmt_t *pmt, int lowcn, demux_program_t *prog)
+{
+	int j;
+	int orig_vid, orig_sid, orig_aid;
+	int aidx, vidx, sidx;
+
+	orig_vid = (demuxer->video && demuxer->video->sh) ?
+			((sh_video_t *) demuxer->video->sh)->vid : 0;
+	orig_sid = (demuxer->sub && demuxer->sub->sh) ?
+			((sh_sub_t *) demuxer->sub->sh)->sid : 0;
+	orig_aid = (demuxer->audio && demuxer->audio->sh) ?
+			((sh_audio_t *) demuxer->audio->sh)->aid : 0;
+
+	prog->aid = prog->vid = prog->sid = -2;	//no choice by default
+	aidx = vidx = sidx = -1;
+	for(j = 0; j < pmt->es_cnt; j++)
+	{
+		if (!lowcn && pmt->es[j].highCN_pid != 0)
+			continue;
+
+		if (IS_VIDEO(pmt->es[j].type) && video_id != -2) {
+			if (vidx != -1 && lowcn &&
+			    pmt->es[vidx].highCN_pid != 0 && pmt->es[j].highCN_pid == 0)
+				continue;
+			if (vidx != -1 &&
+			    (!lowcn || pmt->es[vidx].highCN_pid != 0) &&
+			    pmt->es[vidx].pid == orig_vid)
+				continue;
+
+			if (vidx == -1 ||
+			    (lowcn &&
+			     !pmt->es[vidx].highCN_pid && !!pmt->es[j].highCN_pid) ||
+			    pmt->es[j].component_tag < pmt->es[vidx].component_tag) {
+				vidx = j;
+				prog->vid = pmt->es[j].pid;
+			}
+		} else if (IS_SUB(pmt->es[j].type) && dvdsub_id != -2) {
+			if (sidx != -1 && lowcn &&
+			    pmt->es[sidx].highCN_pid != 0 && pmt->es[j].highCN_pid == 0)
+				continue;
+			if (sidx != -1 && dvdsub_lang &&
+			    pes_match_lang(&pmt->es[sidx], dvdsub_lang) &&
+			    !pes_match_lang(&pmt->es[j], dvdsub_lang))
+				continue;
+			if (sidx != -1 &&
+			    (!lowcn || pmt->es[sidx].highCN_pid != 0) &&
+			    (!dvdsub_lang || !dvdsub_lang[0] ||
+			         pes_match_lang(&pmt->es[sidx], dvdsub_lang)) &&
+			    pmt->es[sidx].pid == orig_sid)
+				continue;
+
+			if (sidx == -1 ||
+			    (lowcn && !pmt->es[sidx].highCN_pid && !!pmt->es[j].highCN_pid) ||
+			    (dvdsub_lang &&
+			        !pes_match_lang(&pmt->es[sidx], dvdsub_lang) &&
+			         pes_match_lang(&pmt->es[j], dvdsub_lang)) ||
+			    pmt->es[j].component_tag < pmt->es[sidx].component_tag) {
+				sidx = j;
+				prog->sid = pmt->es[j].pid;
+			}
+		} else if (IS_AUDIO(pmt->es[j].type) && audio_id != -2) {
+			if (aidx != -1 && lowcn &&
+			    pmt->es[aidx].highCN_pid != 0 && pmt->es[j].highCN_pid == 0)
+				continue;
+			if (aidx != -1 && audio_lang &&
+			    pes_match_lang(&pmt->es[aidx], audio_lang) &&
+			    !pes_match_lang(&pmt->es[j], audio_lang))
+				continue;
+			if (aidx != -1 &&
+			    (!lowcn || pmt->es[aidx].highCN_pid != 0) &&
+			    (!audio_lang || !audio_lang[0] ||
+			         pes_match_lang(&pmt->es[aidx], audio_lang)) &&
+			    pmt->es[aidx].pid == orig_aid)
+				continue;
+
+			if (aidx == -1 ||
+			    (lowcn && !pmt->es[aidx].highCN_pid && !!pmt->es[j].highCN_pid) ||
+			    (audio_lang &&
+			        !pes_match_lang(&pmt->es[aidx], audio_lang) &&
+			         pes_match_lang(&pmt->es[j], audio_lang)) ||
+			    pmt->es[j].component_tag < pmt->es[aidx].component_tag) {
+				aidx = j;
+				prog->aid = pmt->es[j].pid;
+			}
+		}
+	}
+}
+
 static int demux_ts_control(demuxer_t *demuxer, int cmd, void *arg)
 {
 	ts_priv_t* priv = (ts_priv_t *)demuxer->priv;
+        pmt_t* pmt;
+        mp4_decoder_config_t *dummy;
 
 	switch(cmd)
 	{
@@ -3541,21 +4268,32 @@ static int demux_ts_control(demuxer_t *demuxer, int cmd, void *arg)
 		case DEMUXER_CTRL_SWITCH_VIDEO:
 		{
 			void *sh = NULL;
-			int i, n;
+			int i = 8192, n;
 			int reftype, areset = 0, vreset = 0;
 			demux_stream_t *ds;
+			int id_max;
+			sh_common_t **streams;
+			int dmode = 0;
 
 			if(cmd == DEMUXER_CTRL_SWITCH_VIDEO)
 			{
 				reftype = TYPE_VIDEO;
 				ds = demuxer->video;
 				vreset  = 1;
+				id_max = priv->last_vid;
+				streams = (sh_common_t **)demuxer->v_streams;
+				if (ds && ds->sh)
+					i = ((sh_video_t *) ds->sh)->vid;
 			}
 			else
 			{
 				reftype = TYPE_AUDIO;
 				ds = demuxer->audio;
 				areset = 1;
+				id_max = priv->last_aid;
+				streams = (sh_common_t **)demuxer->a_streams;
+				if (ds && ds->sh)
+					i = ((sh_audio_t *) ds->sh)->aid;
 			}
 			n = *((int*)arg);
 			if(n == -2)
@@ -3570,30 +4308,51 @@ static int demux_ts_control(demuxer_t *demuxer, int cmd, void *arg)
 
 			if(n < 0)
 			{
-				for(i = 0; i < 8192; i++)
+				// firstly, search from PMT
+				pmt = pmt_of_pid (priv, i, &dummy);
+				if (i < 8192 && pmt && pmt->es_cnt > 0)
 				{
-					if(priv->ts.streams[i].id == ds->id && priv->ts.streams[i].type == reftype)
-						break;
-				}
+					int k, es_idx;
 
-				while(!sh)
-				{
-					i = (i+1) % 8192;
-					if(priv->ts.streams[i].type == reftype)
-					{
-						if(priv->ts.streams[i].id == ds->id)	//we made a complete loop
-							break;
+					es_idx = priv->ts.pids[i]->es_idx;
+					// dmono, main->sub switch
+					if (reftype == TYPE_AUDIO &&
+					    priv->ts.pids[i] &&
+					    priv->ts.pids[i]->is_dualmono &&
+					    ((sh_audio_t *) ds->sh)->dualmono_mode == 0) {
 						sh = priv->ts.streams[i].sh;
+						dmode = 1;
+						goto finish;
 					}
+
+					k = (es_idx + 1) % pmt->es_cnt;
+					while(k != es_idx)
+					{
+						if(priv->ts.streams[pmt->es[k].pid].type == reftype &&
+						   (pmt->es[k].highCN_pid == 0) ^ low_cn)
+						{
+							i = pmt->es[k].pid;
+							break;
+						}
+						k = (k + 1) % pmt->es_cnt;
+					}
+					sh = priv->ts.streams[i].sh;
+				} else {
+					if (i >= 8192 || ds == NULL || ds->id < 0)
+						return DEMUXER_CTRL_NOTIMPL;
+					sh = streams[(ds->id + 1) % id_max];
 				}
 			}
 			else	//audio track <n>
 			{
 				if (n >= 8192 || priv->ts.streams[n].type != reftype) return DEMUXER_CTRL_NOTIMPL;
 				i = n;
-						sh = priv->ts.streams[i].sh;
+				sh = priv->ts.streams[i].sh;
+				if (reftype == TYPE_AUDIO && sh)
+					dmode = ((sh_audio_t *) sh)->dualmono_mode;
 			}
 
+finish:
 			if(sh)
 			{
 				if(ds->id != priv->ts.streams[i].id)
@@ -3601,6 +4360,8 @@ static int demux_ts_control(demuxer_t *demuxer, int cmd, void *arg)
 				ds->id = priv->ts.streams[i].id;
 				ds->sh = sh;
 				ds_free_packs(ds);
+				if (reftype == TYPE_AUDIO)
+					((sh_audio_t *)sh)->dualmono_mode = dmode;
 				mp_msg(MSGT_DEMUX, MSGL_V, "\r\ndemux_ts, switched to audio pid %d, id: %d, sh: %p\r\n", i, ds->id, sh);
 			}
 
@@ -3610,8 +4371,7 @@ static int demux_ts_control(demuxer_t *demuxer, int cmd, void *arg)
 
 		case DEMUXER_CTRL_IDENTIFY_PROGRAM:		//returns in prog->{aid,vid} the new ids that comprise a program
 		{
-			int i, j, cnt=0;
-			int vid_done=0, aid_done=0;
+			int i, cnt=0;
 			pmt_t *pmt = NULL;
 			demux_program_t *prog = arg;
 
@@ -3653,25 +4413,41 @@ static int demux_ts_control(demuxer_t *demuxer, int cmd, void *arg)
 				return DEMUXER_CTRL_NOTIMPL;
 
 			//finally some food
-			prog->aid = prog->vid = -2;	//no audio and no video by default
-			for(j = 0; j < pmt->es_cnt; j++)
-			{
-				if(priv->ts.pids[pmt->es[j].pid] == NULL || priv->ts.streams[pmt->es[j].pid].sh == NULL)
-					continue;
-
-				if(!vid_done && priv->ts.streams[pmt->es[j].pid].type == TYPE_VIDEO)
-				{
-					vid_done = 1;
-					prog->vid = pmt->es[j].pid;
-				}
-				else if(!aid_done && priv->ts.streams[pmt->es[j].pid].type == TYPE_AUDIO)
-				{
-					aid_done = 1;
-					prog->aid = pmt->es[j].pid;
-				}
-			}
-
+			select_pes_in_pmt(demuxer, pmt, low_cn, prog);
 			priv->prog = prog->progid = pmt->progid;
+			priv->pcr_delta = 0.0;
+			return DEMUXER_CTRL_OK;
+		}
+
+		case DEMUXER_CTRL_SET_LOWCN:
+		{
+			int mode;
+			int progidx;
+			pmt_t *pmt;
+			demux_program_t prog;
+
+			mode = *((int *)arg);
+			if (mode == low_cn)
+				return DEMUXER_CTRL_OK;
+
+			progidx = progid_idx_in_pmt(priv, priv->prog);
+			if (progidx < 0)
+				return DEMUXER_CTRL_DONTKNOW;
+
+			pmt = &priv->pmt[progidx];
+			select_pes_in_pmt(demuxer, pmt, mode, &prog);
+			if (prog.vid == -2 && prog.aid == -2)
+				return DEMUXER_CTRL_NOTIMPL;
+
+			if (prog.vid !=-2 &&
+			    !(demuxer->video && demuxer->video->sh &&
+			      ((sh_video_t *) demuxer->video->sh)->vid == prog.vid))
+				demuxer_switch_video(demuxer, prog.vid);
+			if (prog.aid != -2 &&
+			    !(demuxer->audio && demuxer->audio->sh &&
+			      ((sh_audio_t *) demuxer->audio->sh)->aid == prog.aid))
+				demuxer_switch_audio(demuxer, prog.aid);
+			low_cn = mode;
 			return DEMUXER_CTRL_OK;
 		}
 

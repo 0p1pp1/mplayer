@@ -138,6 +138,7 @@ typedef enum {
   MP_CMD_OVERLAY_REMOVE,
 
   MP_CMD_SWITCH_DMONO = 500,
+  MP_CMD_LOWCN,
 
   /// DVDNAV commands
   MP_CMD_DVDNAV_UP = 1000,

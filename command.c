@@ -49,6 +49,7 @@
 #include "mixer.h"
 #include "libmpcodecs/dec_video.h"
 #include "libmpcodecs/dec_teletext.h"
+#include "libmpcodecs/dec_audio.h"
 #include "osdep/strsep.h"
 #include "sub/vobsub.h"
 #include "sub/spudec.h"
@@ -74,6 +75,10 @@
 #include "mp_core.h"
 #include "mp_fifo.h"
 #include "edl.h"
+
+#ifdef CONFIG_MPEGTS_DEMUXER
+#include "libmpdemux/demux_ts.h"
+#endif
 
 #define IS_STREAMTYPE(t) (mpctx->stream && mpctx->stream->type == STREAMTYPE_##t)
 
@@ -890,6 +895,31 @@ static int mp_property_balance(m_option_t *prop, int action, void *arg,
     }
     return M_PROPERTY_NOT_IMPLEMENTED;
 }
+
+#ifdef CONFIG_MPEGTS_DEMUXER
+/// Selected audio id (RW)
+static int mp_property_lowcn(m_option_t *prop, int action, void *arg,
+                             MPContext *mpctx)
+{
+    int ret;
+    int lc;
+
+    lc = low_cn;
+    ret = m_property_flag(prop, action, arg, &lc);
+    if (ret != M_PROPERTY_OK || lc == low_cn)
+        return ret;
+
+    switch (action) {
+    case M_PROPERTY_STEP_DOWN:
+    case M_PROPERTY_STEP_UP:
+    case M_PROPERTY_SET:
+        if (DEMUXER_CTRL_OK !=
+                demux_control(mpctx->demuxer, DEMUXER_CTRL_SET_LOWCN, &lc))
+            return M_PROPERTY_ERROR;
+    }
+    return ret;
+}
+#endif
 
 /// Selected dual-mono mode (RW)
 static int mp_property_dmono(m_option_t *prop, int action, void *arg,
@@ -2158,6 +2188,10 @@ static const m_option_t mp_properties[] = {
      M_OPT_RANGE, 0, 1, NULL },
     { "capturing", mp_property_capture, CONF_TYPE_FLAG,
      M_OPT_RANGE, 0, 1, NULL },
+#ifdef CONFIG_MPEGTS_DEMUXER
+    { "low_cn", mp_property_lowcn, CONF_TYPE_FLAG,
+     M_OPT_RANGE, 0, 1, NULL },
+#endif
 
     // Audio
     { "volume", mp_property_volume, CONF_TYPE_FLOAT,
@@ -2350,6 +2384,10 @@ static struct {
     { "chapter", MP_CMD_SEEK_CHAPTER, 0, 0, -1, NULL },
     { "angle", MP_CMD_SWITCH_ANGLE, 0, 0, -1, NULL },
     { "capturing", MP_CMD_CAPTURING, 1, 0, -1, NULL },
+#ifdef CONFIG_MPEGTS_DEMUXER
+    { "low_cn", MP_CMD_LOWCN, 1, 0, -1, MSGTR_OSDLowCN },
+#endif
+
     // audio
     { "volume", MP_CMD_VOLUME, 0, OSD_VOLUME, -1, MSGTR_Volume },
     { "mute", MP_CMD_MUTE, 1, 0, -1, MSGTR_MuteStatus },

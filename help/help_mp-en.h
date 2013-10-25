@@ -222,6 +222,7 @@ static const char help_text[]=
 #define MSGTR_OSDCapturing "Capturing: %s"
 #define MSGTR_OSDCapturingFailure "Capturing failed"
 #define MSGTR_OSDDualMono "Dual Audio: %s"
+#define MSGTR_OSDLowCN "Low C/N: %s"
 
 // property values
 #define MSGTR_Enabled "enabled"

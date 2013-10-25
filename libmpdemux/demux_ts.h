@@ -27,5 +27,6 @@ extern off_t ts_probe;
 extern int   ts_prog;
 extern int   ts_keep_broken;
 extern int audio_substream_id;
+extern int low_cn;
 
 #endif /* MPLAYER_DEMUX_TS_H */

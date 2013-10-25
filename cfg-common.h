@@ -425,6 +425,11 @@ const m_option_t common_opts[] = {
     {"nosub", &dvdsub_id, CONF_TYPE_FLAG, 0, -1, -2, NULL},
     {"novideo", &video_id, CONF_TYPE_FLAG, 0, -1, -2, NULL},
 
+    // MPEG-TS from ISDB-S  only. select low C/N mode
+#ifdef CONFIG_MPEGTS_DEMUXER
+    {"lowcn", &low_cn, CONF_TYPE_FLAG, 0, 0, 1, NULL},
+#endif
+
     { "hr-mp3-seek", &hr_mp3_seek, CONF_TYPE_FLAG, 0, 0, 1, NULL },
     { "nohr-mp3-seek", &hr_mp3_seek, CONF_TYPE_FLAG, 0, 1, 0, NULL},
 
