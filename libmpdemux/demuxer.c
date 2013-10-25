@@ -342,6 +342,7 @@ sh_audio_t *new_sh_audio_aid(demuxer_t *demuxer, int id, int aid, const char *la
         sh->aid = aid;
         sh->ds = demuxer->audio;
         // set some defaults
+        sh->dualmono_mode = dualmono_mode;      /* defined in dec_audio.c */
         sh->samplesize = 2;
         sh->sample_format = AF_FORMAT_S16_NE;
         sh->audio_out_minsize = 8192;   /* default size, maybe not enough for Win32/ACM */

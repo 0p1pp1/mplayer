@@ -73,7 +73,6 @@
 
 #include "mp_core.h"
 #include "mp_fifo.h"
-#include "libavutil/avstring.h"
 #include "edl.h"
 
 #define IS_STREAMTYPE(t) (mpctx->stream && mpctx->stream->type == STREAMTYPE_##t)
@@ -887,6 +886,44 @@ static int mp_property_balance(m_option_t *prop, int action, void *arg,
             return M_PROPERTY_ERROR;
         M_PROPERTY_CLAMP(prop, *(float*)arg);
         mixer_setbalance(&mpctx->mixer, *(float*)arg);
+        return M_PROPERTY_OK;
+    }
+    return M_PROPERTY_NOT_IMPLEMENTED;
+}
+
+/// Selected dual-mono mode (RW)
+static int mp_property_dmono(m_option_t *prop, int action, void *arg,
+                              MPContext *mpctx)
+{
+    int current_mode;
+
+    if (!mpctx->sh_audio)
+        return M_PROPERTY_UNAVAILABLE;
+    current_mode = mpctx->sh_audio->dualmono_mode;
+
+    switch (action) {
+    case M_PROPERTY_GET:
+        return m_property_int_ro(prop, action, arg, current_mode);
+
+    case M_PROPERTY_PRINT:
+        if (!arg)
+            return M_PROPERTY_ERROR;
+
+        if (current_mode == 0)
+            *(char **) arg = strdup(MSGTR_DMonoMain);
+        else if (current_mode == 1)
+            *(char **) arg = strdup(MSGTR_DMonoSub);
+        else if (current_mode == 2)
+            *(char **) arg = strdup(MSGTR_DMonoBoth);
+        else
+            *(char **) arg = strdup("??");
+        return M_PROPERTY_OK;
+
+    case M_PROPERTY_STEP_UP:
+    case M_PROPERTY_SET:
+        if (!m_property_choice(prop, action, arg,
+                               &mpctx->sh_audio->dualmono_mode))
+            return M_PROPERTY_ERROR;
         return M_PROPERTY_OK;
     }
     return M_PROPERTY_NOT_IMPLEMENTED;
@@ -2143,6 +2180,8 @@ static const m_option_t mp_properties[] = {
      CONF_RANGE, -2, 65535, NULL },
     { "balance", mp_property_balance, CONF_TYPE_FLOAT,
      M_OPT_RANGE, -1, 1, NULL },
+    { "dual_mono", mp_property_dmono, CONF_TYPE_INT,
+     M_OPT_RANGE, 0, 2, NULL },
 
     // Video
     { "fullscreen", mp_property_fullscreen, CONF_TYPE_FLAG,
@@ -2317,6 +2356,7 @@ static struct {
     { "audio_delay", MP_CMD_AUDIO_DELAY, 0, 0, -1, MSGTR_AVDelayStatus },
     { "switch_audio", MP_CMD_SWITCH_AUDIO, 1, 0, -1, MSGTR_OSDAudio },
     { "balance", MP_CMD_BALANCE, 0, OSD_BALANCE, -1, MSGTR_Balance },
+    { "dual_mono", MP_CMD_SWITCH_DMONO, 1, 0, -1, MSGTR_OSDDualMono },
     // video
     { "fullscreen", MP_CMD_VO_FULLSCREEN, 1, 0, -1, NULL },
     { "panscan", MP_CMD_PANSCAN, 0, OSD_PANSCAN, -1, MSGTR_Panscan },

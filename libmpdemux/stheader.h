@@ -71,6 +71,8 @@ typedef struct sh_audio {
   char* a_out_buffer;
   int a_out_buffer_len;
   int a_out_buffer_size;
+  // current dual-mono mode selection (0: main/L, 1: sub/R,  2: both/LR)
+  int dualmono_mode;
 //  void* audio_out;        // the audio_out handle, used for this audio stream
   struct af_stream *afilter;          // the audio filter stream
   const struct ad_functions *ad_driver;

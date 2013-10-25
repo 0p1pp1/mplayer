@@ -292,6 +292,8 @@ static int decode_audio(sh_audio_t *sh_audio,unsigned char *buf,int minlen,int m
 	int len2=maxlen;
 	double pts;
 	int x=ds_get_packet_pts(sh_audio->ds,&start, &pts);
+	uint8_t *side_data;
+
 	if(x<=0) {
 	    start = NULL;
 	    x = 0;
@@ -307,6 +309,9 @@ static int decode_audio(sh_audio_t *sh_audio,unsigned char *buf,int minlen,int m
 	av_init_packet(&pkt);
 	pkt.data = start;
 	pkt.size = x;
+	side_data = av_packet_new_side_data(&pkt, AV_PKT_DATA_JP_DUALMONO, 1);
+	if (side_data)
+	    *side_data = sh_audio->dualmono_mode;
 	if (pts != MP_NOPTS_VALUE) {
 	    sh_audio->pts = pts;
 	    sh_audio->pts_bytes = 0;

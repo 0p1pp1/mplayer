@@ -497,6 +497,8 @@ const m_option_t common_opts[] = {
 #ifdef CONFIG_FAKE_MONO
     {"stereo", &fakemono, CONF_TYPE_INT, CONF_RANGE, 0, 2, NULL},
 #endif
+    // default dual-mono mode. main(L)/sub(R)/both
+    {"dualmono", &dualmono_mode, CONF_TYPE_INT, CONF_RANGE, 0, 2, NULL},
 
     // disable audio
     {"sound", &audio_id, CONF_TYPE_FLAG, 0, -2, -1, NULL},

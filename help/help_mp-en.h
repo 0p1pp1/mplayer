@@ -221,6 +221,7 @@ static const char help_text[]=
 #define MSGTR_OSDDeinterlace "Deinterlace: %s"
 #define MSGTR_OSDCapturing "Capturing: %s"
 #define MSGTR_OSDCapturingFailure "Capturing failed"
+#define MSGTR_OSDDualMono "Dual Audio: %s"
 
 // property values
 #define MSGTR_Enabled "enabled"
@@ -234,6 +235,9 @@ static const char help_text[]=
 #define MSGTR_SubSourceFile "file"
 #define MSGTR_SubSourceVobsub "vobsub"
 #define MSGTR_SubSourceDemux "embedded"
+#define MSGTR_DMonoMain "main"
+#define MSGTR_DMonoSub  "sub"
+#define MSGTR_DMonoBoth "both"
 
 // OSD bar names
 #define MSGTR_Volume "Volume"

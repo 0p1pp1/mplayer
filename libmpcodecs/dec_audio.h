@@ -26,6 +26,7 @@ extern af_cfg_t af_cfg;
 
 extern int audio_output_channels;
 extern int fakemono;
+extern int dualmono_mode;
 
 // dec_audio.c:
 void afm_help(void);

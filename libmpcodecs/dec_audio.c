@@ -44,6 +44,8 @@
 #ifdef CONFIG_FAKE_MONO
 int fakemono = 0;
 #endif
+/* default selection for dual-mono mode. 0: main/L, 1: sub/R, 2: both/LR */
+int dualmono_mode = 0;
 
 /* used for ac3surround decoder - set using -channels option */
 int audio_output_channels = 2;
