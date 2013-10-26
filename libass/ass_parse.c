@@ -373,6 +373,13 @@ char *parse_tag(ASS_Renderer *render_priv, char *p, double pwr)
                 render_priv->state.hspacing * (1 - pwr) + val * pwr;
         else
             render_priv->state.hspacing = render_priv->state.style->Spacing;
+    } else if (mystrcmp(&p, "lsp")) {
+        double val;
+        if (mystrtod(&p, &val))
+            render_priv->state.lspacing =
+                render_priv->state.lspacing * (1 - pwr) + val * pwr;
+        else
+            render_priv->state.lspacing = render_priv->settings.line_spacing;
     } else if (mystrcmp(&p, "fs+")) {
         double val;
         if (mystrtod(&p, &val)) {

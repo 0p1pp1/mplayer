@@ -932,6 +932,7 @@ void reset_render_context(ASS_Renderer *render_priv, ASS_Style *style)
     render_priv->state.scale_x = style->ScaleX;
     render_priv->state.scale_y = style->ScaleY;
     render_priv->state.hspacing = style->Spacing;
+    render_priv->state.lspacing = render_priv->settings.line_spacing;
     render_priv->state.be = 0;
     render_priv->state.blur = style->Blur;
     render_priv->state.shadow_x = style->Shadow;
@@ -1004,6 +1005,9 @@ static void draw_opaque_box(ASS_Renderer *render_priv, GlyphInfo *info,
     double scale_x = info->scale_x;
     int vertical = render_priv->state.font->desc.vertical;
 
+ass_msg(render_priv->library, MSGL_DBG2,
+    "draw_opq asc:%d desc:%d adv(%d,%d) sx:%d sy:%d", asc >> 6, desc >> 6,
+    advance.x >> 6, advance.y >> 6, sx >> 6, sy >> 6);
     // to avoid gaps
     sx = FFMAX(64, sx);
     sy = FFMAX(64, sy);
@@ -1439,12 +1443,13 @@ get_bitmap_glyph(ASS_Renderer *render_priv, GlyphInfo *info)
  *   lines[].height
  *   lines[].asc
  *   lines[].desc
+ *   lines[].lspacing
  */
 static void measure_text(ASS_Renderer *render_priv)
 {
     TextInfo *text_info = &render_priv->text_info;
     int cur_line = 0;
-    double max_asc = 0., max_desc = 0.;
+    double max_asc = 0., max_desc = 0., max_sp = 0.;
     GlyphInfo *last = NULL;
     int i;
     int empty_line = 1;
@@ -1454,12 +1459,16 @@ static void measure_text(ASS_Renderer *render_priv)
             if (empty_line && cur_line > 0 && last && i < text_info->length) {
                 max_asc = d6_to_double(last->asc) / 2.0;
                 max_desc = d6_to_double(last->desc) / 2.0;
+                max_sp = last->lspacing / 2.0;
             }
             text_info->lines[cur_line].asc = max_asc;
             text_info->lines[cur_line].desc = max_desc;
+            text_info->lines[cur_line].lspacing = max_sp;
             text_info->height += max_asc + max_desc;
+            if (i != text_info->length)
+                text_info->height += max_sp;
             cur_line++;
-            max_asc = max_desc = 0.;
+            max_asc = max_desc = max_sp = 0.;
             empty_line = 1;
         } else
             empty_line = 0;
@@ -1469,13 +1478,12 @@ static void measure_text(ASS_Renderer *render_priv)
                 max_asc = d6_to_double(cur->asc);
             if (d6_to_double(cur->desc) > max_desc)
                 max_desc = d6_to_double(cur->desc);
+            if (cur->lspacing > max_sp)
+                max_sp = cur->lspacing;
             if (cur->symbol != '\n' && cur->symbol != 0)
                 last = cur;
         }
     }
-    text_info->height +=
-        (text_info->n_lines -
-         1) * render_priv->settings.line_spacing;
 }
 
 /**
@@ -1712,10 +1720,10 @@ wrap_lines_smart(ASS_Renderer *render_priv, double max_text_width)
             run_offset++;
             if (vertical) {
                 pen_shift_y = d6_to_double(-cur->pos.y);
-                pen_shift_x -= height + render_priv->settings.line_spacing;
+                pen_shift_x -= height + text_info->lines[cur_line - 2].lspacing;
             } else {
                 pen_shift_x = d6_to_double(-cur->pos.x);
-                pen_shift_y += height + render_priv->settings.line_spacing;
+                pen_shift_y += height + text_info->lines[cur_line - 2].lspacing;
             }
             ass_msg(render_priv->library, MSGL_DBG2,
                    "shifting from %d to %d by (%f, %f)", i,
@@ -1932,6 +1940,7 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
         glyphs[text_info->length].border_x= render_priv->state.border_x;
         glyphs[text_info->length].border_y = render_priv->state.border_y;
         glyphs[text_info->length].hspacing = render_priv->state.hspacing;
+        glyphs[text_info->length].lspacing = render_priv->state.lspacing;
         glyphs[text_info->length].bold = render_priv->state.bold;
         glyphs[text_info->length].italic = render_priv->state.italic;
         glyphs[text_info->length].flags = render_priv->state.flags;
@@ -2092,14 +2101,14 @@ ass_msg(render_priv->library, MSGL_DBG2, "max_txt_w:%g", max_text_width);
                 pen.y = 0;
                 pen.x -= double_to_d6(text_info->lines[lineno-1].desc);
                 pen.x -= double_to_d6(text_info->lines[lineno].asc);
-                pen.x -= double_to_d6(render_priv->settings.line_spacing);
+                pen.x -= double_to_d6(text_info->lines[lineno-1].lspacing);
             } else {
             // XXX: should be pen.y += .... ?
             pen.y -= (info->fay / info->scale_x * info->scale_y) * pen.x;
             pen.x = 0;
             pen.y += double_to_d6(text_info->lines[lineno-1].desc);
             pen.y += double_to_d6(text_info->lines[lineno].asc);
-            pen.y += double_to_d6(render_priv->settings.line_spacing);
+            pen.y += double_to_d6(text_info->lines[lineno-1].lspacing);
             }
             lineno++;
         }
