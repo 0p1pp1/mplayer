@@ -154,6 +154,10 @@ static int add_face(void *fc_priv, ASS_Font *font, uint32_t ch)
     }
     charmap_magic(font->library, face);
     buggy_font_workaround(face);
+    ass_msg(font->library, MSGL_V, "add_face (asc,desc):(%hd,%hd) em:%hu "
+        "adv:%hd h:%hd bbox.x:(%d,%d)", face->ascender, face->descender,
+        face->units_per_EM, face->max_advance_width, face->height,
+        face->bbox.xMin, face->bbox.xMax);
 
     font->faces[font->n_faces++] = face;
     ass_face_set_size(face, font->size);
@@ -575,13 +579,6 @@ FT_Glyph ass_font_get_glyph(void *fontconfig_priv, ASS_Font *font,
 
         FT_Outline_Translate(&((FT_OutlineGlyph) glyph)->outline,
             m->vertBearingX - m->horiBearingX, - m->vertBearingY - m->horiBearingY);
-ass_msg(font->library, MSGL_V,
-    "gidx:%x w:%g h:%g hAdv:%g vAdv:%g hBX:%g hBT:%g vBX:%g vBT:%g lha:%g lva:%g",
-    index, d6_to_double(m->width), d6_to_double(m->height),
-    d6_to_double(m->horiAdvance), d6_to_double(m->vertAdvance),
-    d6_to_double(m->horiBearingX), d6_to_double(m->horiBearingY),
-    d6_to_double(m->vertBearingX), d6_to_double(m->vertBearingY),
-    d16_to_double(face->glyph->linearHoriAdvance), d16_to_double(face->glyph->linearVertAdvance));
     }
 #if 0
     // Rotate glyph, if needed

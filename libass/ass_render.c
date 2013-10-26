@@ -1007,9 +1007,6 @@ static void draw_opaque_box(ASS_Renderer *render_priv, GlyphInfo *info,
     double scale_x = info->scale_x;
     int vertical = render_priv->state.font->desc.vertical;
 
-ass_msg(render_priv->library, MSGL_DBG2,
-    "draw_opq asc:%d desc:%d adv(%d,%d) sx:%d sy:%d", asc >> 6, desc >> 6,
-    advance.x >> 6, advance.y >> 6, sx >> 6, sy >> 6);
     // to avoid gaps
     sx = FFMAX(64, sx);
     sy = FFMAX(64, sy);
@@ -1222,11 +1219,11 @@ get_outline_glyph(ASS_Renderer *priv, GlyphInfo *info)
 {
 FT_Face f = info->font->faces[info->face_index];
 ass_msg(priv->library, MSGL_DBG2,
-    "v.(asc,desc)=(%d,%d) f.(asc,desc)=(%g,%g) pos(%d,%d) ofs(%d,%d) adv(%g,%g) bbox(%d,%d)-(%d,%d)",
+    "v.(asc,desc)=(%d,%d) f.(asc,desc)=(%g,%g) ofs(%d,%d) adv(%g,%g) bbox(%d,%d)-(%d,%d)",
     v.asc >> 6, v.desc >> 6,
     d6_to_double(f->size->metrics.ascender) * info->scale_y,
     - d6_to_double(f->size->metrics.descender) * info->scale_y,
-    info->pos.x >> 6, info->pos.y >> 6, info->offset.x >> 6, info->offset.y >> 6,
+    info->offset.x >> 6, info->offset.y >> 6,
     d6_to_double(info->advance.x), d6_to_double(info->advance.y),
     v.bbox_scaled.xMin >> 6, v.bbox_scaled.yMin >> 6, v.bbox_scaled.xMax >> 6, v.bbox_scaled.yMax >>6);
 }
@@ -1467,6 +1464,10 @@ static void measure_text(ASS_Renderer *render_priv)
             text_info->lines[cur_line].desc = max_desc;
             text_info->lines[cur_line].lspacing = max_sp;
             text_info->height += max_asc + max_desc;
+            ass_msg(render_priv->library, MSGL_V,
+                "line[%d] until %d. asc:%g desc:%g lsp:%g", cur_line, i,
+                text_info->lines[cur_line].asc, text_info->lines[cur_line].desc,
+                text_info->lines[cur_line].lspacing);
             if (i != text_info->length)
                 text_info->height += max_sp;
             cur_line++;
@@ -2030,9 +2031,6 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
         while (info) {
             info->pos.x = cluster_pen.x;
             info->pos.y = cluster_pen.y;
-ass_msg(render_priv->library, MSGL_V, "gidx:%x pos:(%g,%g) adv:(%g,%g)",
-    info->glyph_index, d6_to_double(info->pos.x), d6_to_double(info->pos.y),
-    d6_to_double(info->advance.x), d6_to_double(info->advance.y));
 
             cluster_pen.x += info->advance.x;
             cluster_pen.y += - info->advance.y;
@@ -2082,7 +2080,6 @@ ass_msg(render_priv->library, MSGL_V, "gidx:%x pos:(%g,%g) adv:(%g,%g)",
     if ((render_priv->state.evt_type != EVENT_HSCROLL && !vertical) ||
         (render_priv->state.evt_type != EVENT_VSCROLL && vertical)) {
         // rearrange text in several lines
-ass_msg(render_priv->library, MSGL_DBG2, "max_txt_w:%g", max_text_width);
         wrap_lines_smart(render_priv, max_text_width);
     } else {
         // no breaking or wrapping, everything in a single line
@@ -2119,6 +2116,11 @@ ass_msg(render_priv->library, MSGL_DBG2, "max_txt_w:%g", max_text_width);
             lineno++;
         }
         if (info->skip) continue;
+        ass_msg(render_priv->library, MSGL_DBG2,
+            "[%02d]: gidx:%x pos:(%g,%g) adv:(%g,%g)", i, info->glyph_index,
+            d6_to_double(pen.x), d6_to_double(pen.y),
+            d6_to_double(info->cluster_advance.x),
+            d6_to_double(info->cluster_advance.y));
         FT_Vector cluster_pen = pen;
         while (info) {
             info->pos.x = info->offset.x + cluster_pen.x;
@@ -2178,8 +2180,6 @@ ass_msg(render_priv->library, MSGL_DBG2, "max_txt_w:%g", max_text_width);
 
     // determing text bounding box
     compute_string_bbox(text_info, &bbox);
-ass_msg(render_priv->library, MSGL_DBG2, "bbox (%g,%g) (%g,%g)",
-    bbox.xMin, bbox.yMin, bbox.xMax, bbox.yMax);
 
     // determine device coordinates for text
 
@@ -2355,7 +2355,10 @@ ass_msg(render_priv->library, MSGL_DBG2, "bbox (%g,%g) (%g,%g)",
         device_y =
             y2scr_pos(render_priv, render_priv->state.pos_y) - base_y;
     }
-ass_msg(render_priv->library, MSGL_DBG2, "dev_pos:(%g,%g)", device_x, device_y);
+    ass_msg(render_priv->library, MSGL_DBG2,
+        "dev_pos:(%g,%g) sc:%g fsz:%g fsc-x:%g", device_x, device_y,
+        render_priv->font_scale, render_priv->state.font_size,
+        render_priv->font_scale_x);
 
     // fix clip coordinates (they depend on alignment)
     if (render_priv->state.evt_type == EVENT_NORMAL ||
@@ -2448,12 +2451,14 @@ ass_msg(render_priv->library, MSGL_DBG2, "dev_pos:(%g,%g)", device_x, device_y);
 
     // convert glyphs to bitmaps
     int left = render_priv->settings.left_margin;
-    device_x = (device_x - left) * render_priv->font_scale_x + left; // ?
+    device_x = (device_x - left) * render_priv->font_scale_x + left;
     for (i = 0; i < text_info->length; ++i) {
         GlyphInfo *info = glyphs + i;
         while (info) {
             OutlineBitmapHashKey *key = &info->hash_key.u.outline;
             info->pos.x *= render_priv->font_scale_x;
+            ass_msg(render_priv->library, MSGL_DBG2, "[%02d] (%4d, %4d)",
+                i, info->pos.x >> 6, info->pos.y >> 6);
             key->advance.x =
                 double_to_d6(device_x - (int) device_x +
                         d6_to_double(info->pos.x & SUBPIXEL_MASK)) & ~SUBPIXEL_ACCURACY;
