@@ -128,6 +128,7 @@ typedef struct ass_track {
         YCBCR_FCC_TV,
         YCBCR_FCC_PC
     } YCbCrMatrix;
+    int streaming_mode;
 
     int default_style;      // index of default style
     char *name;             // file name in case of external subs, 0 for streams

@@ -585,6 +585,8 @@ static int process_info_line(ASS_Track *track, char *str)
         track->Language = malloc(3);
         strncpy(track->Language, p, 2);
         track->Language[2] = 0;
+    } else if (!strncmp(str, "StreamingMode:", 14)) {
+        track->streaming_mode = parse_bool(str + 14);
     }
     return 0;
 }

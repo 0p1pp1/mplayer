@@ -30,6 +30,8 @@
 #define SUBPIXEL_MASK 63
 #define SUBPIXEL_ACCURACY 7
 
+#define MPEGTS_MAXTS_MS (((2ULL << 33) + 89) / 90)
+
 ASS_Renderer *ass_renderer_init(ASS_Library *library)
 {
     int error;
@@ -2641,6 +2643,25 @@ static int cmp_event_layer(const void *p1, const void *p2)
     return 0;
 }
 
+static int cmp_pts(long long a, long long b)
+{
+    if (a == b)
+        return 0;
+    else if (a < b && b - a < MPEGTS_MAXTS_MS / 2)
+        return -1;
+    else if (a < b) // b - a >= MPEGTS_MAXTS_MS/2
+        return 1; // wrap around
+    else if (a - b < MPEGTS_MAXTS_MS / 2) // a > b
+        return 1;
+    else
+        return -1;
+}
+
+static int cmp_event_start(const void *p1, const void *p2)
+{
+    return cmp_pts(((ASS_Event *)p1)->Start, ((ASS_Event *)p2)->Start);
+}
+
 static ASS_RenderPriv *get_render_priv(ASS_Renderer *render_priv,
                                        ASS_Event *event)
 {
@@ -2706,7 +2727,8 @@ static int fit_segment(Segment *s, Segment *fixed, int *cnt, int dir)
                 s->hb <= fixed[i].ha || s->ha >= fixed[i].hb)
                 continue;
             shift = fixed[i].b - s->a;
-    } else                      // dir == -1, move up
+        }
+    else                      // dir == -1, move up
         for (i = *cnt - 1; i >= 0; --i) {
             if (s->b + shift <= fixed[i].a || s->a + shift >= fixed[i].b ||
                 s->hb <= fixed[i].ha || s->ha >= fixed[i].hb)
@@ -2888,13 +2910,45 @@ ASS_Image *ass_render_frame(ASS_Renderer *priv, ASS_Track *track,
         return 0;
     }
 
+    if (track->streaming_mode) {
+        unsigned int a, b, mid;
+        int cmp;
+
+        // sort by start time
+        qsort(track->events, track->n_events, sizeof(ASS_Event), cmp_event_start);
+        // bsearch the position of "now"
+        a = 0;
+        b = track->n_events - 1;
+        mid = 0;
+        while (a <= b) {
+            mid = (a + b) >> 1;
+            cmp = cmp_pts(track->events[mid].Start, now);
+            if (cmp <= 0)
+                a = mid + 1;
+            else if (a == b)
+                break;
+            else
+                b = mid;
+        }
+        // events[0]...events[a-1] <= now < events[a]
+        //  keep events[a-1] only
+        if (a > 1) {
+            int i;
+            for (i = 0; i < a - 1; i++)
+                ass_free_event(track, i);
+            memmove(track->events, &track->events[a - 1],
+                sizeof(ASS_Event) * (track->n_events - a + 1));
+            track->n_events -= a - 1;
+            ass_msg(priv->library, MSGL_V, "discarded %d events.", a - 1);
+        }
+    }
+
     // render events separately
     cnt = 0;
     for (i = 0; i < track->n_events; ++i) {
         ASS_Event *event = track->events + i;
         long long end = event->Start + event->Duration;
         // handle PTS roll-over in mpeg TS
-#define MPEGTS_MAXTS_MS (((2ULL << 33) + 89) / 90)
         if ((event->Start <= now && now < end)
             || (end > MPEGTS_MAXTS_MS && now + MPEGTS_MAXTS_MS < end)) {
             if (cnt >= priv->eimg_size) {
