@@ -50,6 +50,10 @@ static void ass_reconfigure(ASS_Renderer *priv)
         priv->storage_width = priv->orig_width;
         priv->storage_height = priv->orig_height;
     }
+ass_msg(priv->library, MSGL_DBG2,
+    "w:%d h:%d  ow:%d oh:%d  owc:%d ohc:%d par:%g",
+    priv->width, priv->height, priv->orig_width, priv->orig_height,
+    priv->orig_width_nocrop, priv->orig_height_nocrop, priv->settings.par);
 }
 
 void ass_set_frame_size(ASS_Renderer *priv, int w, int h)

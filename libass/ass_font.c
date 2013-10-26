@@ -265,6 +265,11 @@ void ass_font_get_asc_desc(ASS_Font *font, uint32_t ch, int *asc,
         TT_OS2 *os2 = FT_Get_Sfnt_Table(face, ft_sfnt_os2);
         if (FT_Get_Char_Index(face, ch)) {
             int y_scale = face->size->metrics.y_scale;
+            if (font->desc.vertical) {
+                int x_scale = face->size->metrics.x_scale;
+                *asc = FT_MulFix((face->max_advance_width + 1) / 2, x_scale);
+                *desc = FT_MulFix(face->max_advance_width / 2, x_scale);
+            } else
             if (os2) {
                 *asc = FT_MulFix(os2->usWinAscent, y_scale);
                 *desc = FT_MulFix(os2->usWinDescent, y_scale);
@@ -319,19 +324,36 @@ static int ass_strike_outline_glyph(FT_Face face, ASS_Font *font,
     // Add points to the outline
     if (under && ps) {
         int pos, size;
-        pos = FT_MulFix(ps->underlinePosition, y_scale * font->scale_y);
-        size = FT_MulFix(ps->underlineThickness,
-                         y_scale * font->scale_y / 2);
+        FT_Vector points[4];
 
-        if (pos > 0 || size <= 0)
-            return 1;
+        if (font->desc.vertical) {
+            int x_scale = face->size->metrics.x_scale;
 
-        FT_Vector points[4] = {
-            {.x = bear,      .y = pos + size},
-            {.x = advance,   .y = pos + size},
-            {.x = advance,   .y = pos - size},
-            {.x = bear,      .y = pos - size},
-        };
+            bear = FFMAX(- face->glyph->metrics.vertBearingY, 0);
+            advance = d16_to_d6(- glyph->advance.y) - 32;
+            pos = face->size->metrics.max_advance * font->scale_x / 2;
+            size = FT_MulFix(ps->underlineThickness, y_scale * font->scale_x / 2);
+
+            if (pos < 0 || size <= 0)
+                return 1;
+
+            points[0].x = pos - size;  points[0].y = bear;
+            points[1].x = pos + size;  points[1].y = bear;
+            points[2].x = pos + size;  points[2].y = advance;
+            points[3].x = pos - size;  points[3].y = advance;
+        } else {
+            pos = FT_MulFix(ps->underlinePosition, y_scale * font->scale_y);
+            size = FT_MulFix(ps->underlineThickness,
+                             y_scale * font->scale_y / 2);
+
+            if (pos > 0 || size <= 0)
+                return 1;
+
+            points[0].x = bear;     points[0].y = pos + size;
+            points[1].x = advance;  points[1].y = pos + size;
+            points[2].x = advance;  points[2].y = pos - size;
+            points[3].x = bear;     points[3].y = pos - size;
+        }
 
         if (dir == FT_ORIENTATION_TRUETYPE) {
             for (i = 0; i < 4; i++) {
@@ -521,6 +543,8 @@ FT_Glyph ass_font_get_glyph(void *fontconfig_priv, ASS_Font *font,
     case ASS_HINTING_NATIVE:
         break;
     }
+    if (vertical)
+        flags |= FT_LOAD_VERTICAL_LAYOUT;
 
     error = FT_Load_Glyph(face, index, flags);
     if (error) {
@@ -544,6 +568,20 @@ FT_Glyph ass_font_get_glyph(void *fontconfig_priv, ASS_Font *font,
         return 0;
     }
 
+    if (vertical) {
+        FT_Glyph_Metrics *m = &face->glyph->metrics;
+
+        FT_Outline_Translate(&((FT_OutlineGlyph) glyph)->outline,
+            m->vertBearingX - m->horiBearingX, - m->vertBearingY - m->horiBearingY);
+ass_msg(font->library, MSGL_V,
+    "gidx:%x w:%g h:%g hAdv:%g vAdv:%g hBX:%g hBT:%g vBX:%g vBT:%g lha:%g lva:%g",
+    index, d6_to_double(m->width), d6_to_double(m->height),
+    d6_to_double(m->horiAdvance), d6_to_double(m->vertAdvance),
+    d6_to_double(m->horiBearingX), d6_to_double(m->horiBearingY),
+    d6_to_double(m->vertBearingX), d6_to_double(m->vertBearingY),
+    d16_to_double(face->glyph->linearHoriAdvance), d16_to_double(face->glyph->linearVertAdvance));
+    }
+#if 0
     // Rotate glyph, if needed
     if (vertical && ch >= VERTICAL_LOWER_BOUND) {
         FT_Matrix m = { 0, double_to_d16(-1.0), double_to_d16(1.0), 0 };
@@ -556,9 +594,11 @@ FT_Glyph ass_font_get_glyph(void *fontconfig_priv, ASS_Font *font,
         FT_Outline_Translate(&((FT_OutlineGlyph) glyph)->outline, 0, -desc);
         FT_Outline_Transform(&((FT_OutlineGlyph) glyph)->outline, &m);
         FT_Outline_Translate(&((FT_OutlineGlyph) glyph)->outline,
-                             face->glyph->metrics.vertAdvance, desc);
+                             face->glyph->metrics.vertAdvance, desc - face->glyph->metrics.horiAdvance / 2);
         glyph->advance.x = face->glyph->linearVertAdvance;
+        glyph->advance.y = 0;
     }
+#endif
 
     // Apply scaling and shift
     FT_Matrix scale = { double_to_d16(font->scale_x), 0, 0,
@@ -567,6 +607,7 @@ FT_Glyph ass_font_get_glyph(void *fontconfig_priv, ASS_Font *font,
     FT_Outline_Transform(outl, &scale);
     FT_Outline_Translate(outl, font->v.x, font->v.y);
     glyph->advance.x *= font->scale_x;
+    glyph->advance.y *= font->scale_y;
 
     ass_strike_outline_glyph(face, font, glyph, deco & DECO_UNDERLINE,
                              deco & DECO_STRIKETHROUGH);

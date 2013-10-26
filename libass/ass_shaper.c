@@ -214,10 +214,12 @@ get_cached_metrics(struct ass_shaper_metrics_data *metrics, FT_Face face,
 
         memcpy(&new_val.metrics, &face->glyph->metrics, sizeof(FT_Glyph_Metrics));
 
+#if 0
         // if @font rendering is enabled and the glyph should be rotated,
         // make cached_h_advance pick up the right advance later
         if (metrics->vertical && glyph >= VERTICAL_LOWER_BOUND)
             new_val.metrics.horiAdvance = new_val.metrics.vertAdvance;
+#endif
 
         val = ass_cache_put(metrics->metrics_cache, &metrics->hash_key, &new_val);
     }
@@ -553,8 +555,9 @@ static void shape_harfbuzz(ASS_Shaper *shaper, GlyphInfo *glyphs, size_t len)
         runs[run].font   = get_hb_font(shaper, glyphs + k);
         set_run_features(shaper, glyphs + k);
         hb_buffer_pre_allocate(runs[run].buf, i - k + 1);
-        hb_buffer_set_direction(runs[run].buf, direction ? HB_DIRECTION_RTL :
-                HB_DIRECTION_LTR);
+        hb_buffer_set_direction(runs[run].buf, glyphs[k].font->desc.vertical ?
+                HB_DIRECTION_TTB :
+                        (direction ? HB_DIRECTION_RTL : HB_DIRECTION_LTR));
         hb_buffer_set_language(runs[run].buf,
                 hb_shaper_get_run_language(shaper, script));
         hb_buffer_set_script(runs[run].buf, script);
