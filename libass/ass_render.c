@@ -1472,16 +1472,20 @@ static void measure_text(ASS_Renderer *render_priv)
             cur_line++;
             max_asc = max_desc = max_sp = 0.;
             empty_line = 1;
+            continue;
         } else
             empty_line = 0;
         if (i < text_info->length) {
             GlyphInfo *cur = text_info->glyphs + i;
+            double lsp = cur->lspacing * render_priv->font_scale;
+            if (render_priv->state.font->desc.vertical)
+                lsp /= render_priv->font_scale_x;
             if (d6_to_double(cur->asc) > max_asc)
                 max_asc = d6_to_double(cur->asc);
             if (d6_to_double(cur->desc) > max_desc)
                 max_desc = d6_to_double(cur->desc);
-            if (cur->lspacing > max_sp)
-                max_sp = cur->lspacing;
+            if (lsp > max_sp)
+                max_sp = lsp;
             if (cur->symbol != '\n' && cur->symbol != 0)
                 last = cur;
         }
@@ -1722,10 +1726,10 @@ wrap_lines_smart(ASS_Renderer *render_priv, double max_text_width)
             run_offset++;
             if (vertical) {
                 pen_shift_y = d6_to_double(-cur->pos.y);
-                pen_shift_x -= height + text_info->lines[cur_line - 2].lspacing;
+                pen_shift_x = -(height + text_info->lines[cur_line - 2].lspacing);
             } else {
                 pen_shift_x = d6_to_double(-cur->pos.x);
-                pen_shift_y += height + text_info->lines[cur_line - 2].lspacing;
+                pen_shift_y = height + text_info->lines[cur_line - 2].lspacing;
             }
             ass_msg(render_priv->library, MSGL_DBG2,
                    "shifting from %d to %d by (%f, %f)", i,
@@ -2008,7 +2012,7 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
         } else {
         // add horizontal letter spacing
         info->cluster_advance.x += double_to_d6(info->hspacing *
-                render_priv->font_scale * info->scale_x);
+                render_priv->font_scale * info->scale_x / render_priv->font_scale_x);
 
         // add displacement for vertical shearing
         info->cluster_advance.y += (info->fay / info->scale_x * info->scale_y) * info->cluster_advance.x;
@@ -2117,8 +2121,8 @@ ass_msg(render_priv->library, MSGL_DBG2, "max_txt_w:%g", max_text_width);
         if (info->skip) continue;
         FT_Vector cluster_pen = pen;
         while (info) {
-            info->pos.x = !vertical * info->offset.x + cluster_pen.x;
-            info->pos.y = !vertical * info->offset.y + cluster_pen.y;
+            info->pos.x = info->offset.x + cluster_pen.x;
+            info->pos.y = info->offset.y + cluster_pen.y;
             cluster_pen.x += info->advance.x;
             cluster_pen.y += - info->advance.y;
             info = info->next;
@@ -2136,7 +2140,7 @@ ass_msg(render_priv->library, MSGL_DBG2, "max_txt_w:%g", max_text_width);
             if ((i == text_info->length) || glyphs[i].linebreak) {
                 // remove letter spacing (which is included in cluster_advance)
                 if (i > 0)
-                    width -= render_priv->state.hspacing * render_priv->font_scale *
+                    width -= glyphs[i-1].hspacing * render_priv->font_scale *
                         (vertical ? glyphs[i-1].scale_y : glyphs[i-1].scale_x);
                 double shift = 0;
                 if ((halign == HALIGN_LEFT && !vertical) ||
@@ -2585,6 +2589,7 @@ ass_start_frame(ASS_Renderer *render_priv, ASS_Track *track,
     render_priv->time = now;
 
     ass_lazy_track_init(render_priv->library, render_priv->track);
+    ass_set_storage_size(render_priv, track->PlayResX, track->PlayResY);
 
     render_priv->font_scale = settings_priv->font_size_coeff *
         render_priv->orig_height / render_priv->track->PlayResY;

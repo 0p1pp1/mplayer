@@ -608,8 +608,9 @@ ass_msg(font->library, MSGL_V,
     FT_Outline *outl = &((FT_OutlineGlyph) glyph)->outline;
     FT_Outline_Transform(outl, &scale);
     FT_Outline_Translate(outl, font->v.x, font->v.y);
-    glyph->advance.x *= font->scale_x;
-    glyph->advance.y *= font->scale_y;
+    // ?? ass_shaper_shape() already scaled these.
+ //   glyph->advance.x *= font->scale_x;
+ //   glyph->advance.y *= font->scale_y;
 
     ass_strike_outline_glyph(face, font, glyph, deco & DECO_UNDERLINE,
                              deco & DECO_STRIKETHROUGH);
