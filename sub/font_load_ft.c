@@ -1145,7 +1145,8 @@ void load_font_ft(int width, int height, font_desc_t** fontp, const char *font_n
 #ifdef CONFIG_FONTCONFIG
     if (font_fontconfig > 0)
     {
-	FcInit();
+	if (!ass_enabled || !ass_library)
+	    FcInit();
 	fc_pattern = FcNameParse(font_name ? font_name : "sans-serif");
 	FcConfigSubstitute(0, fc_pattern, FcMatchPattern);
 	FcDefaultSubstitute(fc_pattern);
@@ -1170,6 +1171,8 @@ void load_font_ft(int width, int height, font_desc_t** fontp, const char *font_n
             FcPatternDestroy(fc_pattern);
             return;
         }
+        if (fc_pattern2)
+            FcPatternDestroy(fc_pattern2);
         // Failed to match any font, try without fontconfig
         mp_msg(MSGT_OSD, MSGL_ERR, MSGTR_LIBVO_FONT_LOAD_FT_FontconfigNoMatch);
     }

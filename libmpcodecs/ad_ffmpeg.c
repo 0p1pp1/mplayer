@@ -317,6 +317,7 @@ static int decode_audio(sh_audio_t *sh_audio,unsigned char *buf,int minlen,int m
 	    sh_audio->pts_bytes = 0;
 	}
 	y=avcodec_decode_audio4(sh_audio->context, frame, &got_frame, &pkt);
+	av_packet_free_side_data(&pkt);
 //printf("return:%d samples_out:%d bitstream_in:%d sample_sum:%d\n", y, len2, x, len); fflush(stdout);
 	// LATM may need many packets to find mux info
 	if (y == AVERROR(EAGAIN))
