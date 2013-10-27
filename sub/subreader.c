@@ -2505,6 +2505,7 @@ void sub_free( sub_data * subd )
  * <> and {} are interpreted as comment delimiters, "\n", "\N", '\n', '\r'
  * and '\0' are interpreted as newlines, duplicate, leading and trailing
  * newlines are ignored.
+ * plus, leading and traing [zero-width] spaces are ignored.
  */
 void sub_add_text(subtitle *sub, const char *txt, int len, double endpts, int strip_markup) {
   int comment = 0;
@@ -2542,6 +2543,13 @@ void sub_add_text(subtitle *sub, const char *txt, int len, double endpts, int st
       if (pos == MAX_SUBLINE - 1) {
         i--;
         c = 0;
+      }
+      if (c == ' ')
+          continue;
+      // strip [zero-width] space
+      if (i + 2 < len && c == '\xe2' && txt[i+1] == '\x80' && txt[i+2] == '\x8b') {
+          i += 2;
+          continue;
       }
       if (c == '\\' && i + 1 < len) {
         c = txt[++i];

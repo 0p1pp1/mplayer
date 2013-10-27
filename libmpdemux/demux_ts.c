@@ -97,6 +97,7 @@ typedef enum
 	SPU_DVB		= 0x3000001,
 	SPU_TELETEXT	= 0x3000002,
 	SPU_PGS		= 0x3000003,
+	SPU_ISDB	= 0x3000010,
 	PES_PRIVATE1	= 0xBD00000,
 	SL_PES_STREAM	= 0xD000000,
 	SL_SECTION	= 0xD100000,
@@ -117,7 +118,7 @@ typedef struct {
 	int pid;
 	int ecm_pid;
 	char lang[4];
-	// copy from PMT
+	// copy from EIT, for audio / subpicture
 	char lang2[4];
 	int is_dualmono;
 	int component_tag;
@@ -336,6 +337,7 @@ static int IS_SUB(es_stream_type_t type)
 	case SPU_DVB:
 	case SPU_PGS:
 	case SPU_TELETEXT:
+	case SPU_ISDB:
 		return 1;
 	}
 	return 0;
@@ -379,6 +381,25 @@ try_fec:
 	return TS_PH_PACKET_SIZE;
 }
 
+static void sub_set_lang_tag(sh_sub_t *sh)
+{
+	if (sh && sh->type == 'j' && dvdsub_lang && sh->lang && sh->lang2) {
+		char *p1, *p2;
+
+		p1 = strstr(dvdsub_lang, sh->lang);
+		p2 = strstr(dvdsub_lang, sh->lang2);
+
+		if (p2 != NULL && (p1 == NULL || p2 < p1)) {
+			mp_msg(MSGT_DEMUX, MSGL_V,
+				"setting lang. tag of sub pid[0x%04x] to 1.\n",
+				sh->sid);
+			sh->cur_lang_tag = 1;
+			return;
+		}
+	}
+	sh->cur_lang_tag = 0;
+}
+
 static int parse_avc_sps(uint8_t *buf, int len, int *w, int *h);
 static uint8_t *pid_lang_from_pmt(ts_priv_t *priv, int pid);
 
@@ -392,11 +413,12 @@ static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
 		sh_common_t *sh;
 		int ctag;
 
+		// for ISDB, tag and lang(s) might have been set by EIT...
 		ctag = es->component_tag;
 		sh = priv->ts.streams[es->pid].sh;
 		sh->default_track = ctag == 0x00 || ctag == 0x10 || ctag == 0x30;
 
-		if (es->lang[0]) {
+		if (es->lang[0] && (!sh->lang || strcmp(sh->lang, es->lang))) {
 			free(sh->lang);
 			sh->lang = strdup(es->lang);
 		}
@@ -405,8 +427,20 @@ static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
 		    (IS_AUDIO(es->type) || IS_AUDIO(es->subtype))) {
 			sh_audio_t *sh_audio = (sh_audio_t *) sh;
 
-			free(sh_audio->lang2);
-			sh_audio->lang2 = strdup(es->lang2);
+			if (!sh_audio->lang2 || strcmp(sh_audio->lang2, es->lang2)) {
+				free(sh_audio->lang2);
+				sh_audio->lang2 = strdup(es->lang2);
+			}
+		}
+		if (es->type == SPU_ISDB) {
+			sh_sub_t *sh_sub = (sh_sub_t *) sh;
+
+			if (!sh_sub->lang2 || strcmp(sh_sub->lang2, es->lang2)) {
+				free(sh_sub->lang2);
+				sh_sub->lang2 = es->lang2[0] ?
+						    strdup(es->lang2) : NULL;
+			}
+			sub_set_lang_tag(sh_sub);
 		}
 		return;
 	}
@@ -489,13 +523,22 @@ static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
 				sh->type = 'p'; break;
 			case SPU_TELETEXT:
 				sh->type = 'd'; break;
+			case SPU_ISDB:
+				sh->type = 'j'; break;
         		}
+			sh->format = es->type;
 			sh->default_track = (es->component_tag == 0x30);
 			if (es->lang[0])
 				sh->lang = strdup(es->lang);
+			if (es->type == SPU_ISDB) {
+				if (es->lang2[0])
+					sh->lang2 = strdup(es->lang2);
+				sub_set_lang_tag(sh);
+			}
 			priv->ts.streams[es->pid].id = priv->last_sid;
 			priv->ts.streams[es->pid].sh = sh;
 			priv->ts.streams[es->pid].type = TYPE_SUB;
+			mp_msg(MSGT_DEMUX, MSGL_V, "\r\nADDED SUB PID %d, type: %x stream n. %d\r\n", es->pid, sh->format, priv->last_sid);
 			priv->last_sid++;
 		}
 	}
@@ -699,7 +742,8 @@ static int pes_match_lang(struct pmt_es_t *pes, char *lang)
 	while ((len = strcspn(lang, ",")) > 0) {
 		if (! strncmp(pes->lang, lang, len))
 			return 1;
-		if (pes->is_dualmono && ! strncmp(pes->lang2, lang, len))
+		if ((pes->is_dualmono || pes->type == SPU_ISDB) &&
+		    ! strncmp(pes->lang2, lang, len))
 			return 2;
 		lang += len;
 		lang += strspn(lang, ",");
@@ -825,7 +869,7 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 				continue;
 			if(is_video && req_vpid==-2)
 				continue;
-			if(is_sub && req_spid==-2)
+			if(is_sub && req_spid<0)
 				continue;
 
 			chosen_pid = 0;
@@ -862,7 +906,7 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 
 			if(param->apid < 0 &&
 			   param->vpid < 0 &&
-			   param->spid < 0 &&
+			   param->spid <= 0 &&
 			   prog_candidate <= 0)
 			{
 				mp_msg(MSGT_IDENTIFY, MSGL_V,
@@ -879,7 +923,7 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 			if(p != -1)
 			{
 				has_tables++;
-				if(!param->prog && chosen_pid)
+				if(param->prog <= 0 && chosen_pid)
 					prog_candidate = p;
 			}
 
@@ -973,6 +1017,8 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 				// assert(chosen_pid || req_spid <= 0)
 				if(chosen_pid) // (req_spid == es.pid)
 					selected = 1;
+// sub should not be auto-selected by default.
+#if 0
 				else { // (req_spid != es.pid) && (req_spid <= 0)
 					// sid not specified by user
 					if (!low_cn && pes && pes->highCN_pid != 0)
@@ -1004,12 +1050,13 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 					else if(pes->component_tag < spes->component_tag)
 						selected = 1;
 				}
+#endif
 
 				if(selected)
 				{
 					if (param->spid != es.pid || (pes && !spes))
 						mp_msg(MSGT_IDENTIFY, MSGL_V,
-							"sub found! 0x%04hx tag:0x%02x"
+							"New sub found! 0x%04hx tag:0x%02x"
 							" in [0x%04x].\n",
 							es.pid, pes ? pes->component_tag : 0xff,
 							prog_candidate);
@@ -1179,7 +1226,11 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 	}
 
 	if(IS_SUB(param->stype))
-		mp_msg(MSGT_DEMUXER, MSGL_INFO, " SUB %s(pid=%d) ", (param->stype==SPU_DVD ? "DVD" : param->stype==SPU_DVB ? "DVB" : "Teletext"), param->spid);
+		mp_msg(MSGT_DEMUXER, MSGL_INFO, " SUB %s(pid=%d) ",
+			(param->stype==SPU_DVD ? "DVD" :
+			 param->stype==SPU_DVB ? "DVB" :
+			 param->stype==SPU_ISDB ? "ISDB" : "Teletext"),
+			param->spid);
 	else
 	{
 		param->stype = UNKNOWN;
@@ -1376,7 +1427,16 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 		demuxer->audio->sh = NULL;
 	}
 
-	if (params.stype == UNKNOWN) {
+	if (params.stype != UNKNOWN) {
+		sh_sub_t *sh_sub;
+		ts_add_stream(demuxer, priv->ts.pids[params.spid]);
+		sh_sub = priv->ts.streams[params.spid].sh;
+		demuxer->sub->id = priv->ts.streams[params.spid].id;
+		sh_sub->ds = demuxer->sub;
+		sh_sub->format = params.stype;
+		demuxer->sub->sh = sh_sub;
+	}
+	else {
 		demuxer->sub->id = -2;
 		demuxer->sub->sh = NULL;
 	}
@@ -1737,7 +1797,8 @@ static int pes_parse2(unsigned char *buf, uint16_t packet_len, ES_stream_t *es, 
 	pes_is_aligned = (p[6] & 4);
 
 	stream_id  = p[3];
-
+	if (stream_id == 0xBF) // 0xBF incl. ISDB super(impose) has no extension
+		return 0;
 
 	if (p[7] & 0x80)
 	{ 	/* pts available */
@@ -1823,6 +1884,15 @@ static int pes_parse2(unsigned char *buf, uint16_t packet_len, ES_stream_t *es, 
 			es->type  = SPU_DVB;
 			es->payload_size -= packet_len;
 
+			return 1;
+		}
+		else if (type_from_pmt == SPU_ISDB ||
+		(packet_len >= 2 && p[0] == 0x80 && p[1] == 0xff))
+		{
+			es->start   = p;
+			es->size    = packet_len;
+			es->type    = SPU_ISDB;
+			es->payload_size -= packet_len;
 			return 1;
 		}
 		else if (pes_is_aligned && packet_len >= 1 && ((p[0] & 0xE0) == 0x20))	//SPU_DVD
@@ -2062,7 +2132,7 @@ static int collect_section(ts_section_t *section, int is_start, unsigned char *b
 	uint16_t tlen;
 	int skip, tid;
 
-	mp_msg(MSGT_DEMUX, MSGL_V, "COLLECT_SECTION, start: %d, size: %d, collected: %d\n", is_start, size, section->buffer_len);
+	mp_msg(MSGT_DEMUX, MSGL_DBG2, "COLLECT_SECTION, start: %d, size: %d, collected: %d\n", is_start, size, section->buffer_len);
 	if(! is_start && !section->buffer_len)
 		return 0;
 
@@ -2115,7 +2185,7 @@ static int collect_section(ts_section_t *section, int is_start, unsigned char *b
 		return 0;
 
 	tlen = ((ptr[1] & 0x0f) << 8) | ptr[2];
-	mp_msg(MSGT_DEMUX, MSGL_V, "SKIP: %d+1, TID: %d, TLEN: %d, COLLECTED: %d\n", skip, tid, tlen, section->buffer_len);
+	mp_msg(MSGT_DEMUX, MSGL_DBG2, "SKIP: %d+1, TID: %d, TLEN: %d, COLLECTED: %d\n", skip, tid, tlen, section->buffer_len);
 	if(section->buffer_len < (skip+1+3+tlen))
 	{
 		mp_msg(MSGT_DEMUX, MSGL_DBG2, "DATA IS NOT ENOUGH, NEXT TIME\n");
@@ -2903,6 +2973,14 @@ static int parse_descriptors(struct pmt_es_t *es, uint8_t *ptr)
 			if (refpid != 0x1fff && ! (ptr[j+2] & 0x01))
 				es->highCN_pid = refpid;
 		}
+		else if(ptr[j] == 0xFD) // Data Coding Method Descriptor
+		{
+			if (es->type == 6 && descr_len >= 2) {
+				uint16_t code = ptr[j+2] << 8 | ptr[j+3];
+				if (code == 0x8 || code == 0x12)
+					es->type = SPU_ISDB;
+			}
+		}
 		else
 			mp_msg(MSGT_DEMUX, MSGL_DBG2, "Unknown descriptor 0x%x, SKIPPING\n", ptr[j]);
 
@@ -3013,6 +3091,98 @@ static void parse_acomp(ts_priv_t * priv, pmt_t * pmt, unsigned char *buf)
 	return;
 }
 
+static void parse_dcomp(ts_priv_t * priv, pmt_t * pmt, unsigned char *buf)
+{
+	int len;
+	uint8_t component_tag;
+	int selector_len, num_lang, lang_tag;
+	int i;
+	sh_sub_t *sh_sub;
+	ES_stream_t *tss;
+	uint8_t *p;
+
+	len = buf[1] + 2;
+	if (len < 11)
+		goto bad_data;
+
+	component_tag = buf[4];
+	if (component_tag < 0x30 || (buf[2] << 8 | buf[3]) != 0x0008) {
+		mp_msg(MSGT_DEMUX, MSGL_V, "skipped non ISDB SPU desc.\n");
+		return;
+	}
+
+	for (i = 0; i < pmt->es_cnt; i++)
+		if (pmt->es[i].component_tag == component_tag)
+			break;
+	if (i == pmt->es_cnt) {
+		mp_msg(MSGT_DEMUX, MSGL_V,
+			"no PES with the tag:0x%02hhx.\n", component_tag);
+		return;
+	}
+
+	selector_len = buf[5];
+	if (selector_len < 5 || selector_len != buf[6] * 4 + 1 ||
+	    selector_len + 11 < len)
+		goto bad_data;
+
+	mp_msg(MSGT_DEMUX, MSGL_V, "spu pid:0x%04x", pmt->es[i].pid);
+	pmt->es[i].type = SPU_ISDB;
+
+	pmt->es[i].lang[0] = 0;
+	pmt->es[i].lang2[0] = 0;
+	num_lang = buf[6];
+	p = buf + 7;
+	while (num_lang-- > 0) {
+		lang_tag = *p >> 5;
+		if (lang_tag == 0) {
+			memcpy(pmt->es[i].lang, p + 1, 3);
+			pmt->es[i].lang[3] = 0;
+			mp_msg(MSGT_DEMUX, MSGL_V, " [0]:%s", pmt->es[i].lang);
+		} else if (lang_tag == 1) {
+			memcpy(pmt->es[i].lang2, p + 1, 3);
+			pmt->es[i].lang2[3] = 0;
+			mp_msg(MSGT_DEMUX, MSGL_V, " [1]:%s", pmt->es[i].lang2);
+		}
+		p += 4;
+	}
+	mp_msg(MSGT_DEMUX, MSGL_V, "\n");
+
+	tss = priv->ts.pids[pmt->es[i].pid];
+	if (tss) {
+		tss->type = pmt->es[i].type;
+		tss->component_tag = component_tag;
+		memcpy(tss->lang, pmt->es[i].lang, 4);
+		memcpy(tss->lang2, pmt->es[i].lang2, 4);
+	}
+	sh_sub = priv->ts.streams[pmt->es[i].pid].sh;
+	if (sh_sub) {
+		free(sh_sub->lang);
+		sh_sub->lang = NULL;
+		free(sh_sub->lang2);
+		sh_sub->lang2 = NULL;
+
+		free(sh_sub->extradata);
+		sh_sub->extradata = NULL;
+		sh_sub->extradata_len = 0;
+
+		if (tss->lang[0])
+			sh_sub->lang = strdup(tss->lang);
+
+		if (tss->lang2[0])
+			sh_sub->lang2 = strdup(tss->lang2);
+
+		if (dvdsub_lang && pes_match_lang(&pmt->es[i], dvdsub_lang) == 2)
+			sh_sub->cur_lang_tag = 1;
+		else
+			sh_sub->cur_lang_tag = 0;
+	}
+	return;
+
+bad_data:
+	mp_msg(MSGT_DEMUX, MSGL_INFO, "Broken Data Contents Descriptor.\n");
+	return;
+}
+
 
 // parse EIT to set audio language
 static int parse_eit(ts_priv_t * priv, int is_start, unsigned char *buff, int size)
@@ -3088,6 +3258,8 @@ static int parse_eit(ts_priv_t * priv, int is_start, unsigned char *buff, int si
 			break;
 		if (base[0] == 0xC4)
 			parse_acomp(priv, pmt, base);
+		else if (base[0] == 0xC7)
+			parse_dcomp(priv, pmt, base);
 		dlen -= base[1] + 2;
 		base += base[1] + 2;
 	}
@@ -3274,9 +3446,16 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 
 		pmt->es[idx].component_tag = -1;
 		pmt->es[idx].lang[0] = 0;
+		pmt->es[idx].lang2[0] = 0;
 		pmt->es[idx].highCN_pid = 0;
 		parse_descriptors(&pmt->es[idx], &es_base[5]);
 
+		// discard ISDB super(impose)
+		if (pmt->es[idx].type == SPU_ISDB &&
+		    pmt->es[idx].component_tag != 0x87 &&
+		    !(pmt->es[idx].component_tag >= 0x30 &&
+		      pmt->es[idx].component_tag < 0x38))
+			pmt->es[idx].type = UNKNOWN;
 		if (pmt->es[idx].es_ecm.pid < 8192) // per-stream ECM specified.
 			es_ecm = pmt->es[idx].es_ecm;
 		else
@@ -3717,6 +3896,7 @@ static void reselect_streams(demuxer_t *demuxer)
 			demuxer->sub->id = priv->ts.streams[pid].id;
 			demuxer->sub->sh = priv->ts.streams[pid].sh;
 			ds_free_packs(demuxer->sub);
+			sub_set_lang_tag(demuxer->sub->sh);
 
 			mp_msg(MSGT_DEMUX, MSGL_INFO, "subpic stream pid: %#04hx -> %#04hx\n",
 				prev_spid, pid);
@@ -4211,8 +4391,7 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 
 		if(is_start)
 		{
-			mp_msg(MSGT_DEMUX, MSGL_DBG2, "IS_START\n");
-
+			mp_msg(MSGT_DEMUX, MSGL_DBG2, "IS_START %d\n", pid);
 			len = pes_parse2(p, buf_size, es, pid_type, pmt, pid);
 			if(! len)
 			{
@@ -4598,14 +4777,15 @@ static int demux_ts_control(demuxer_t *demuxer, int cmd, void *arg)
 	{
 		case DEMUXER_CTRL_SWITCH_AUDIO:
 		case DEMUXER_CTRL_SWITCH_VIDEO:
+		case DEMUXER_CTRL_SWITCH_SUB:
 		{
 			void *sh = NULL;
 			int i = 8192, n;
-			int reftype, areset = 0, vreset = 0;
+			int reftype, areset = 0, vreset = 0, sreset = 0;
 			demux_stream_t *ds;
 			int id_max;
 			sh_common_t **streams;
-			int dmode = 0;
+			int dmode = 0, lang_tag = 0;
 
 			if(cmd == DEMUXER_CTRL_SWITCH_VIDEO)
 			{
@@ -4616,6 +4796,16 @@ static int demux_ts_control(demuxer_t *demuxer, int cmd, void *arg)
 				streams = (sh_common_t **)demuxer->v_streams;
 				if (ds && ds->sh)
 					i = ((sh_video_t *) ds->sh)->vid;
+			}
+			else if (cmd == DEMUXER_CTRL_SWITCH_SUB)
+			{
+				reftype = TYPE_SUB;
+				ds = demuxer->sub;
+				sreset  = 1;
+				id_max = priv->last_sid;
+				streams = (sh_common_t **)demuxer->s_streams;
+				if (ds && ds->sh)
+					i = ((sh_sub_t *) ds->sh)->sid;
 			}
 			else
 			{
@@ -4630,7 +4820,7 @@ static int demux_ts_control(demuxer_t *demuxer, int cmd, void *arg)
 			n = *((int*)arg);
 			if(n == -2)
 			{
-				reset_fifos(demuxer, areset, vreset, 0);
+				reset_fifos(demuxer, areset, vreset, sreset);
 				ds->id = -2;
 				ds->sh = NULL;
 				ds_free_packs(ds);
@@ -4656,10 +4846,23 @@ static int demux_ts_control(demuxer_t *demuxer, int cmd, void *arg)
 						dmode = 1;
 						goto finish;
 					}
+					else if (reftype == TYPE_SUB &&
+					         priv->ts.pids[i] &&
+					         priv->ts.pids[i]->type == SPU_ISDB &&
+					         priv->ts.pids[i]->lang2[0] &&
+					         ((sh_sub_t *) ds->sh)->cur_lang_tag == 0) {
+						sh = priv->ts.streams[i].sh;
+						lang_tag = 1;
+						goto finish;
+					}
 
 					k = (es_idx + 1) % pmt->es_cnt;
 					while(k != es_idx)
 					{
+						if (k == 0 && reftype == TYPE_SUB) {
+							*((int*)arg) = -1;
+							return DEMUXER_CTRL_OK;
+						}
 						if(priv->ts.streams[pmt->es[k].pid].type == reftype &&
 						   (pmt->es[k].highCN_pid == 0) ^ low_cn)
 						{
@@ -4668,6 +4871,22 @@ static int demux_ts_control(demuxer_t *demuxer, int cmd, void *arg)
 						}
 						k = (k + 1) % pmt->es_cnt;
 					}
+					sh = priv->ts.streams[i].sh;
+				} else if (i == 8192 && reftype == TYPE_SUB) {
+					int k;
+					int pidx = progid_idx_in_pmt(priv, priv->prog);
+					if (pidx < 0)
+						return DEMUXER_CTRL_NOTIMPL;
+					pmt = &priv->pmt[pidx];
+					for (k = 0; k < pmt->es_cnt; k++)
+						if (priv->ts.streams[pmt->es[k].pid].type == reftype &&
+						    (pmt->es[k].highCN_pid == 0) ^ low_cn)
+							break;
+					if (k == pmt->es_cnt) {
+						*((int*)arg) = -1;
+						return DEMUXER_CTRL_OK;
+					}
+					i = pmt->es[k].pid;
 					sh = priv->ts.streams[i].sh;
 				} else {
 					if (i >= 8192 || ds == NULL || ds->id < 0)
@@ -4688,12 +4907,15 @@ finish:
 			if(sh)
 			{
 				if(ds->id != priv->ts.streams[i].id)
-					reset_fifos(demuxer, areset, vreset, 0);
+					reset_fifos(demuxer, areset, vreset, sreset);
 				ds->id = priv->ts.streams[i].id;
 				ds->sh = sh;
 				ds_free_packs(ds);
 				if (reftype == TYPE_AUDIO)
 					((sh_audio_t *)sh)->dualmono_mode = dmode;
+				else if (reftype == TYPE_SUB)
+					((sh_sub_t *)sh)->cur_lang_tag = lang_tag;
+
 				mp_msg(MSGT_DEMUX, MSGL_V, "\r\ndemux_ts, switched to audio pid %d, id: %d, sh: %p\r\n", i, ds->id, sh);
 			}
 

@@ -126,6 +126,8 @@ extern int verbose;
 
 #define MSGT_TELETEXT 46       // Teletext decoder
 
+#define MSGT_DECSUB 47
+
 #define MSGT_MAX 64
 
 

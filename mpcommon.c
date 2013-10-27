@@ -47,6 +47,7 @@
 #include "sub/vobsub.h"
 #include "sub/av_sub.h"
 #include "sub/sub_cc.h"
+#include "sub/isdbsubdec.h"
 #include "libmpcodecs/dec_teletext.h"
 #include "libavutil/intreadwrite.h"
 #include "m_option.h"
@@ -57,6 +58,7 @@ double sub_last_pts = -303;
 #ifdef CONFIG_ASS
 ASS_Track* ass_track = 0; // current track to render
 #endif
+int event_items = -1;
 
 sub_data* subdata = NULL;
 subtitle* vo_sub_last = NULL;
@@ -164,7 +166,7 @@ void init_vo_spudec(struct stream *stream, struct sh_video *sh_video, struct sh_
 
 static int is_text_sub(int type)
 {
-    return type == 't' || type == 'm' || type == 'a';
+    return type == 't' || type == 'm' || type == 'a' || type == 'j';
 }
 
 static int is_av_sub(int type)
@@ -192,6 +194,8 @@ void update_subtitles(sh_video_t *sh_video, double refpts, demux_stream_t *d_dvd
         if (is_av_sub(type))
             reset_avsub(d_dvdsub->sh);
 #endif
+        if (type == 'j')
+            isdbsub_reset(d_dvdsub->sh);
         subcc_reset();
     }
     // find sub
@@ -312,13 +316,20 @@ void update_subtitles(sh_video_t *sh_video, double refpts, demux_stream_t *d_dvd
                 subcc_process_data(packet, len);
                 continue;
             }
+            if (type == 'j') {
+                type = isdbsub_decode(d_dvdsub->sh, &packet, &len, &subpts, &endpts);
+                if (type <= 0)
+                    continue;
+                // "type" should be set to 'a'
+            }
 #ifdef CONFIG_ASS
             if (ass_enabled) {
                 sh_sub_t* sh = d_dvdsub->sh;
                 ass_track = sh ? sh->ass_track : NULL;
                 if (!ass_track) continue;
                 if (type == 'a') { // ssa/ass subs with libass
-                    if (len > 10 && memcmp(packet, "Dialogue: ", 10) == 0)
+                    if ((len > 10 && memcmp(packet, "Dialogue: ", 10) == 0) ||
+                        (len > 0 && packet[0] == '['))
                         ass_process_data(ass_track, packet, len);
                     else
                         ass_process_chunk(ass_track, packet, len,
@@ -335,29 +346,62 @@ void update_subtitles(sh_video_t *sh_video, double refpts, demux_stream_t *d_dvd
                         sub_clear_text(&tmp_subs, MP_NOPTS_VALUE);
                     }
                 }
+                if (packet)
+                    free(packet);
                 continue;
             }
 #endif
             if (subpts != MP_NOPTS_VALUE) {
+                unsigned char *q = packet;
                 if (endpts == MP_NOPTS_VALUE)
                     sub_clear_text(&subs, MP_NOPTS_VALUE);
                 if (type == 'a') { // ssa/ass subs without libass => convert to plaintext
                     int i;
                     unsigned char* p = packet;
                     int skip_commas = 8;
-                    if (len > 10 && memcmp(packet, "Dialogue: ", 10) == 0)
+                    if (len > 0 && *p == '[') {
+                        if ((p = strstr(packet, "[Events]\nFormat:")) != NULL) {
+                            p += strlen("[Events]\nFormat:");
+                            for (event_items = 0; *p != '\0' && *p != '\n'; p++)
+                                if (*p == ',')
+                                    event_items++;
+                            mp_msg(MSGT_SUBREADER, MSGL_V,
+                                "[osd] event items: %d\n", event_items);
+                        }
+                        p = strstr(packet, "Dialogue: ");
+                        if (p == NULL) {
+                            free(q);
+                            continue;
+                        }
+                    }
+                    if (len > 10 && memcmp(p, "Dialogue: ", 10) == 0)
                         skip_commas = 9;
+                    if (event_items >= 0)
+                        skip_commas = event_items;
                     for (i=0; i < skip_commas && *p != '\0'; p++)
                         if (*p == ',')
                             i++;
-                    if (*p == '\0')  /* Broken line? */
+                    if (*p == '\0') { /* Broken line? */
+                        free(q);
                         continue;
+                    }
                     len -= p - packet;
                     packet = p;
+                    // hack for multi "Dialogue:" lines.
+                    // fill '\n' to replace non text items.
+                    while ((p = strchr(p, '\n'))) {
+                        for (i=0; i < skip_commas && *p != '\0'; p++) {
+                            if (*p == ',')
+                                i++;
+                            *p = '\n';
+                        }
+                    }
                 }
                 if (endpts == MP_NOPTS_VALUE) endpts = subpts + 4;
                 sub_add_text(&subs, packet, len, endpts, 1);
                 set_osd_subtitle(&subs);
+                if (q)
+                    free(q);
             }
             if (d_dvdsub->non_interleaved)
                 ds_get_next_pts(d_dvdsub);

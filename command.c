@@ -1106,6 +1106,8 @@ static int mp_property_program(m_option_t *prop, int action, void *arg,
         }
         mp_property_do("switch_audio", M_PROPERTY_SET, &prog.aid, mpctx);
         mp_property_do("switch_video", M_PROPERTY_SET, &prog.vid, mpctx);
+        if (sub_source(mpctx) == SUB_SOURCE_DEMUX)
+            mp_property_do("sub_demux", M_PROPERTY_SET, &prog.sid, mpctx);
         return M_PROPERTY_OK;
 
     default:
@@ -1519,6 +1521,7 @@ static int mp_property_sub(m_option_t *prop, int action, void *arg,
     int source_pos = -1;
     double pts = 0;
     char *sub_name;
+    int lang_tag = -1;
 
     update_global_sub_size(mpctx);
     global_sub_size = mpctx->global_sub_size;
@@ -1562,13 +1565,15 @@ static int mp_property_sub(m_option_t *prop, int action, void *arg,
         }
         if (dvdsub_id >= 0) {
             char lang[40] = MSGTR_Unknown;
+            uint16_t pid;
             int id = dvdsub_id;
             // HACK: for DVDs sub->sh/id will be invalid until
             // we actually get the first packet
             if (d_sub && d_sub->sh)
                 id = d_sub->id;
             demuxer_sub_lang(mpctx->demuxer, id, lang, sizeof(lang));
-            snprintf(*(char **) arg, 63, "(%d) %s", dvdsub_id, lang);
+            pid = ((sh_sub_t *)mpctx->demuxer->s_streams[id])->sid;
+            snprintf(*(char **) arg, 63, "0x%04hx(%d) %s", pid, dvdsub_id, lang);
             return M_PROPERTY_OK;
         }
         snprintf(*(char **) arg, 63, MSGTR_Disabled);
@@ -1584,14 +1589,46 @@ static int mp_property_sub(m_option_t *prop, int action, void *arg,
         mpctx->global_sub_pos = *(int *) arg;
         break;
     case M_PROPERTY_STEP_UP:
+        if (sub_source(mpctx) == SUB_SOURCE_DEMUX ||
+            mpctx->global_sub_pos + 1 == sub_pos_by_source(mpctx, SUB_SOURCE_DEMUX)) {
+            int index = -1;
+            // try firstly to select only the PES's in the same program
+            if (demux_control(mpctx->demuxer, DEMUXER_CTRL_SWITCH_SUB, &index)
+                == DEMUXER_CTRL_OK) {
+                if (index >= 0) {
+                    // found a good PES.
+                    // sh->cur_lang_tag should be already set in _SWITCH_SUB,
+                    //  so leave lang_tag untouched (-1).
+                    mpctx->global_sub_pos = index +
+                        sub_pos_by_source(mpctx, SUB_SOURCE_DEMUX);
+                    break;
+                }
+                // no good PES.
+                // try the next source.
+                mpctx->global_sub_pos =
+                    sub_pos_by_source(mpctx, SUB_SOURCE_DEMUX + 1);
+                lang_tag = 0;
+                break;
+            }
+        }
         mpctx->global_sub_pos += 2;
         mpctx->global_sub_pos =
             (mpctx->global_sub_pos % (global_sub_size + 1)) - 1;
+        lang_tag = 0;
         break;
     case M_PROPERTY_STEP_DOWN:
+        if (sub_source(mpctx) == SUB_SOURCE_DEMUX) {
+            // DEMUXER_CTRL_SWITCH_SUB only supports STEP_UP....
+            sh_sub_t *sh = d_sub->sh;
+            if (sh && sh->lang2 && sh->cur_lang_tag == 1) {
+                lang_tag = 0;
+                break;
+            }
+        }
         mpctx->global_sub_pos += global_sub_size + 1;
         mpctx->global_sub_pos =
             (mpctx->global_sub_pos % (global_sub_size + 1)) - 1;
+        lang_tag = 1;
         break;
     default:
         return M_PROPERTY_NOT_IMPLEMENTED;
@@ -1662,6 +1699,14 @@ static int mp_property_sub(m_option_t *prop, int action, void *arg,
                 else if (ass_enabled)
                     ass_track = sh->ass_track;
 #endif
+                if (sh->lang2 && lang_tag == 1)
+                    sh->cur_lang_tag = 1;
+                else if (lang_tag == 0)
+                    sh->cur_lang_tag = 0;
+                // don't touch sh->cur_lang_tag if lang_tag == -1
+                mp_msg(MSGT_CPLAYER, MSGL_V,
+                    "switched to sub_demux:%d[0x%04x] lang:%d\n",
+                    d_sub->id, sh->sid, sh->cur_lang_tag);
             } else {
               d_sub->id = -2;
               d_sub->sh = NULL;
@@ -1771,6 +1816,7 @@ static int mp_property_sub_by_type(m_option_t *prop, int action, void *arg,
                                    MPContext *mpctx)
 {
     int source, is_cur_source, offset, new_pos;
+    sh_sub_t *sh;
     update_global_sub_size(mpctx);
     if (!mpctx->sh_video || mpctx->global_sub_size <= 0)
         return M_PROPERTY_UNAVAILABLE;
@@ -1818,8 +1864,22 @@ static int mp_property_sub_by_type(m_option_t *prop, int action, void *arg,
             int index = *(int *)arg;
             if (source == SUB_SOURCE_VOBSUB)
                 index = vobsub_get_index_by_id(vo_vobsub, index);
+            else if (source == SUB_SOURCE_DEMUX) {
+                int i;
+                for (i = 0; i < MAX_S_STREAMS; i++)
+                    if (mpctx->demuxer->s_streams[i] &&
+                        ((sh_sub_t *)mpctx->demuxer->s_streams[i])->sid == index)
+                        break;
+                index = (i < MAX_S_STREAMS) ? i : -1;
+                mp_msg(MSGT_CPLAYER, MSGL_V,
+                    "mp_property_sub_by_type converted arg:%d to index %d.\n",
+                    *(int *)arg, index);
+            }
             new_pos = offset + index;
             if (index < 0 || index > mpctx->sub_counts[source]) {
+                mp_msg(MSGT_CPLAYER, MSGL_INFO,
+                        "mp_property_sub_by_type: invalid index:%d/%d.\n",
+                        index, mpctx->sub_counts[source]);
                 new_pos = -1;
                 *(int *) arg = -1;
             }
@@ -1828,13 +1888,32 @@ static int mp_property_sub_by_type(m_option_t *prop, int action, void *arg,
             new_pos = -1;
         break;
     case M_PROPERTY_STEP_UP:
+        if (source == SUB_SOURCE_DEMUX) {
+            int index = -1;
+            if (demux_control(mpctx->demuxer, DEMUXER_CTRL_SWITCH_SUB, &index)
+                == DEMUXER_CTRL_OK) {
+                if (index == -1) {
+                    new_pos = -1;
+                    break;
+                }
+                index += offset;
+                return mp_property_sub(prop, M_PROPERTY_SET, &index, mpctx);
+            }
+        }
+        // falls through intentionally
     case M_PROPERTY_STEP_DOWN: {
         int step_all = (arg && *(int*)arg != 0 ? *(int*)arg : 1)
                        * (action == M_PROPERTY_STEP_UP ? 1 : -1);
         int step = (step_all > 0) ? 1 : -1;
         int max_sub_pos_for_source = -1;
+        int lang_tag = -1;
         if (!is_cur_source)
             new_pos = -1;
+        else {
+            sh = mpctx->demuxer->s_streams[new_pos - offset];
+            if (sh && sh->type == 'j')
+                lang_tag = sh->cur_lang_tag;
+        }
         while (step_all) {
             if (new_pos == -1) {
                 if (step > 0)
@@ -1843,22 +1922,50 @@ static int mp_property_sub_by_type(m_option_t *prop, int action, void *arg,
                     // Find max pos for specific source
                     new_pos = mpctx->global_sub_size - 1;
                     while (new_pos >= 0
-                            && sub_source(mpctx) != source)
+                            && sub_source_by_pos(mpctx, new_pos) != source)
                         new_pos--;
                     // cache for next time
                     max_sub_pos_for_source = new_pos;
                 }
                 else
                     new_pos = max_sub_pos_for_source;
+                lang_tag = -1;
             }
             else {
+                if (source == SUB_SOURCE_DEMUX) {
+                    sh = mpctx->demuxer->s_streams[new_pos - offset];
+                    if (sh && sh->type == 'j' && sh->lang2) {
+                        // two sub-streams are contained in this stream.
+                        if (step > 0 && lang_tag != 1) {
+                            // next one is the same stream with lang-tag:1
+                            lang_tag = 1;
+                            step_all -= step;
+                            continue;
+                        } else if (step < 0 && lang_tag != 0) {
+                            // next one is the same stream with lang-tag:0
+                            lang_tag = 0;
+                            step_all -= step;
+                            continue;
+                        }
+
+                        // next one is another/different stream, but
+                        // we don't know if it has sub-streams or not.
+                        lang_tag = -1;
+                        // fall through...
+                    }
+                }
                 new_pos += step;
                 if (new_pos < offset ||
                         new_pos >= mpctx->global_sub_size ||
-                        sub_source(mpctx) != source)
+                        sub_source_by_pos(mpctx, new_pos) != source)
                     new_pos = -1;
             }
             step_all -= step;
+        }
+        if (new_pos != -1) {
+            sh = mpctx->demuxer->s_streams[new_pos - offset];
+            if (sh)
+                sh->cur_lang_tag = (sh->type == 'j' && lang_tag > 0) ? lang_tag : 0;
         }
         break;
     }

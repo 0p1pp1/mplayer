@@ -96,6 +96,7 @@
 #include "stream/tv.h"
 #include "access_mpcontext.h"
 #include "sub/ass_mp.h"
+#include "sub/isdbsubdec.h"
 #include "cfg-mplayer-def.h"
 #include "codec-cfg.h"
 #include "command.h"
@@ -1949,7 +1950,8 @@ static int select_subtitle(MPContext *mpctx)
         // finally select subs by language and container hints
         if (dvdsub_id == -1 && dvdsub_lang)
             dvdsub_id = demuxer_sub_track_by_lang(mpctx->demuxer, dvdsub_lang);
-        if (dvdsub_id == -1)
+        if (dvdsub_id == -1 &&
+            (mpctx->stream->type == STREAMTYPE_DVD || mpctx->stream->type == STREAMTYPE_DVDNAV))
             dvdsub_id = demuxer_default_sub_track(mpctx->demuxer);
         if (dvdsub_id >= 0) {
             id    = dvdsub_id;
@@ -2229,7 +2231,7 @@ static int fill_audio_out_buffers(void)
         // as the ao got underrun and became empty,
         // data to refill the whole ao buffer will be read / consumed burstly,
         // which decreases the stream cache.
-        mpctx->demuxer->stalled_time = 1;
+//        mpctx->demuxer->stalled_time = 1;
     }
 
     while (1) {
@@ -3622,6 +3624,7 @@ goto_enable_cache:
     if ((stream_dump_type) && (stream_dump_type < 4)) {
         FILE *f;
         demux_stream_t *ds = NULL;
+        int is_isdbsub = 0;
         current_module = "dump";
         // select stream to dump
         switch (stream_dump_type) {
@@ -3646,6 +3649,8 @@ goto_enable_cache:
             ds_free_packs(mpctx->d_sub);
             mpctx->d_sub->id = -2;
         }
+        if (stream_dump_type == 3 && ds->sh && ((sh_sub_t *)ds->sh)->type == 'j')
+            is_isdbsub = 1;
         // let's dump it!
         f = fopen(stream_dump_name, "wb");
         if (!f) {
@@ -3659,12 +3664,17 @@ goto_enable_cache:
             int in_size = ds_get_packet_pts(ds, &start, &pts);
             if (is_at_end(mpctx, &end_at, pts))
                 break;
+            if (in_size > 0 && is_isdbsub)
+                if (isdbsub_decode(ds->sh, &start, &in_size, &pts, NULL) <= 0)
+                    continue;
             if ((mpctx->demuxer->file_format == DEMUXER_TYPE_AVI || mpctx->demuxer->file_format == DEMUXER_TYPE_ASF || mpctx->demuxer->file_format == DEMUXER_TYPE_MOV)
                 && stream_dump_type == 2)
                 fwrite(&in_size, 1, 4, f);
             if (in_size > 0) {
                 fwrite(start, in_size, 1, f);
                 stream_dump_progress(in_size, mpctx->stream);
+                if (is_isdbsub)
+                    free(start);
             }
             if (dvd_last_chapter > 0) {
                 int cur_chapter = demuxer_get_current_chapter(mpctx->demuxer);

@@ -128,6 +128,10 @@ typedef struct sh_sub {
   SH_COMMON
   int sid;
   char type;                    // t = text, v = VobSub, a = SSA/ASS
+  // for type == 'j' only.
+  char *lang2;
+  int cur_lang_tag; // which sub track/lang to use.  0:lang, 1:lang2
+
   unsigned char* extradata; // extra header data passed from demuxer
   int extradata_len;
 #ifdef CONFIG_ASS

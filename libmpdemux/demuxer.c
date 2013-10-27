@@ -279,6 +279,7 @@ const char *sh_sub_type2str(int type)
     case 'b': return "dvb";
     case 'd': return "dvb-teletext";
     case 'p': return "hdmv pgs";
+    case 'j': return "isdb";
     }
     return "unknown";
 }
@@ -297,6 +298,10 @@ sh_sub_t *new_sh_sub_sid(demuxer_t *demuxer, int id, int sid, const char *lang)
         sh_sub_t *sh = calloc(1, sizeof(sh_sub_t));
         demuxer->s_streams[id] = sh;
         sh->sid = sid;
+#ifdef CONFIG_ASS
+        if (ass_enabled && ass_library)
+            sh->ass_track = ass_default_track(ass_library);
+#endif
         mp_msg(MSGT_IDENTIFY, MSGL_INFO, "ID_SUBTITLE_ID=%d\n", sid);
         if (lang && lang[0] && strcmp(lang, "und")) {
             sh->lang = strdup(lang);
@@ -319,6 +324,7 @@ static void free_sh_sub(sh_sub_t *sh)
         ass_free_track(sh->ass_track);
 #endif
     free(sh->lang);
+    free(sh->lang2);
 #ifdef CONFIG_FFMPEG
     clear_parser((sh_common_t *)sh);
 #endif
@@ -1871,6 +1877,8 @@ int demuxer_sub_lang(demuxer_t *d, int id, char *buf, int buf_len)
     sh = d->s_streams[id];
     if (sh && sh->lang) {
         av_strlcpy(buf, sh->lang, buf_len);
+        if (sh->lang2 && sh->cur_lang_tag > 0)
+            av_strlcpy(buf, sh->lang2, buf_len);
         return 0;
     }
     req.type = stream_ctrl_sub;
@@ -1906,6 +1914,7 @@ int demuxer_audio_track_by_lang(demuxer_t *d, char *lang)
     return -1;
 }
 
+// XXX: s_streams[] are not filled  at all when this func is called.
 int demuxer_sub_track_by_lang(demuxer_t *d, char *lang)
 {
     int i, len;
@@ -1917,8 +1926,16 @@ int demuxer_sub_track_by_lang(demuxer_t *d, char *lang)
         start = d->sub->id < 0 ? 0 : d->sub->id;
         for (i = 0; i < MAX_S_STREAMS; ++i) {
             sh_sub_t *sh = d->s_streams[(start + i) % MAX_S_STREAMS];
-            if (sh && sh->lang && strncmp(sh->lang, lang, len) == 0)
+            if (!sh)
+                continue;
+            if (sh->lang && strncmp(sh->lang, lang, len) == 0) {
+                sh->cur_lang_tag = 0;
                 return sh->sid;
+            }
+            if (sh->lang2 && strncmp(sh->lang2, lang, len) == 0) {
+                sh->cur_lang_tag = 1;
+                return sh->sid;
+            }
         }
         lang += len;
         lang += strspn(lang, ",");
@@ -1950,8 +1967,15 @@ int demuxer_default_sub_track(demuxer_t *d)
     start = d->sub->id < 0 ? 0 : d->sub->id;
     for (i = 0; i < MAX_S_STREAMS; ++i) {
         sh_sub_t *sh = d->s_streams[(start + i) % MAX_S_STREAMS];
-        if (sh && sh->default_track)
-            return sh->sid;
+        if (sh && sh->default_track) {
+            sh->cur_lang_tag = 0;
+            if (dvdsub_lang && sh->lang && sh->lang2) {
+                char *p1 = strstr(dvdsub_lang, sh->lang);
+                char *p2 = strstr(dvdsub_lang, sh->lang2);
+
+                sh->cur_lang_tag =  p2 != NULL && (p1 == NULL || p2 < p1);
+            }
+        }
     }
     return -1;
 }

@@ -336,10 +336,9 @@ static void eosd_ass_update(struct mp_eosd_source *src, const struct mp_eosd_set
 	ASS_Image *aimg;
 	struct mp_eosd_image *img;
 	if (res->changed || !src->initialized || ass_force_reload) {
-		double dar = (double) (res->w - res->ml - res->mr) / (res->h - res->mt - res->mb);
 		ass_configure(ass_renderer, res->w, res->h, res->unscaled);
 		ass_set_margins(ass_renderer, res->mt + ass_top_margin, res->mb + ass_bottom_margin, res->ml, res->mr);
-		ass_set_aspect_ratio(ass_renderer, dar, (double)res->srcw / res->srch);
+		ass_set_storage_size(ass_renderer, res->srcw, res->srch);
 		src->initialized = 1;
 		ass_force_reload = 0;
 	}

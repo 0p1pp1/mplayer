@@ -459,6 +459,7 @@ SRCS_COMMON = asxparser.c                       \
               stream/url.c                      \
               sub/eosd.c                        \
               sub/find_sub.c                    \
+              sub/isdbsubdec.c                  \
               sub/osd.c                         \
               sub/spudec.c                      \
               sub/sub.c                         \

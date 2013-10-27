@@ -164,6 +164,7 @@ static void print_msg_module(FILE* stream, int mod)
         "ASS",
         "LOADER",
         "STATUSLINE",
+        "DECSUB",
     };
     int c2 = (mod + 1) % 15 + 1;
 
