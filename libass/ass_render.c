@@ -2624,12 +2624,14 @@ ass_start_frame(ASS_Renderer *render_priv, ASS_Track *track,
                          settings_priv->frame_height;
             double sar = ((double) settings_priv->storage_width) /
                          settings_priv->storage_height;
-            par = sar / dar;
+            //par = sar / dar;
+            par = dar / sar;
         } else
             par = 1.0;
     }
     render_priv->font_scale_x = par;
-
+    ass_msg(render_priv->library, MSGL_DBG2, "par %g %g\n",
+        render_priv->settings.par, par);
     render_priv->prev_images_root = render_priv->images_root;
     render_priv->images_root = 0;
 
