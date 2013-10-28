@@ -2132,7 +2132,18 @@ static int parse_pat(ts_priv_t * priv, int is_start, unsigned char *buff, int si
 		priv->pat.progs_cnt = 0;
 
 		for(i = 0; priv->pmt && i < priv->pmt_cnt; i++) {
+			int j;
+			ES_stream_t *tss;
+
 			free(priv->pmt[i].section.buffer);
+			// PES's can be shared amoung programs,
+			// but all programs are removed here anyway.
+			for(j = 0; j < priv->pmt[i].es_cnt; j++) {
+				tss = priv->ts.pids[priv->pmt[i].es[j].pid];
+				if (tss)
+					free(tss);
+				priv->ts.pids[priv->pmt[i].es[j].pid] = NULL;
+			}
 			free(priv->pmt[i].es);
 		}
 		free(priv->pmt);
@@ -3017,6 +3028,13 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 	}
 	if (pmt->es) {
 		mp_msg(MSGT_DEMUX, MSGL_V, "releasing the previous PMT.\n");
+		for (i = 0; i < pmt->es_cnt; i++) {
+			tss = priv->ts.pids[pmt->es[i].pid];
+			if (!tss || tss->prog_idx != idx)
+				continue;
+			free(tss);
+			priv->ts.pids[pmt->es[i].pid] = NULL;
+		}
 		free(pmt->es);
 		pmt->es = NULL;
 		pmt->es_cnt = 0;
