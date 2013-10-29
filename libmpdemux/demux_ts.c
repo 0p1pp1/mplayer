@@ -819,6 +819,8 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 	req_apid = param->apid;
 	req_vpid = param->vpid;
 	req_spid = param->spid;
+	if (req_spid == -1 && param->slang[0] == '\0')
+		req_spid = -2;
 	prog_candidate = param->prog;
 
 	has_tables = 0;
@@ -869,7 +871,7 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 				continue;
 			if(is_video && req_vpid==-2)
 				continue;
-			if(is_sub && req_spid<0)
+			if(is_sub && req_spid==-2)
 				continue;
 
 			chosen_pid = 0;
@@ -906,7 +908,7 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 
 			if(param->apid < 0 &&
 			   param->vpid < 0 &&
-			   param->spid <= 0 &&
+			   param->spid < 0 && !is_sub &&
 			   prog_candidate <= 0)
 			{
 				mp_msg(MSGT_IDENTIFY, MSGL_V,
@@ -1017,8 +1019,6 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 				// assert(chosen_pid || req_spid <= 0)
 				if(chosen_pid) // (req_spid == es.pid)
 					selected = 1;
-// sub should not be auto-selected by default.
-#if 0
 				else { // (req_spid != es.pid) && (req_spid <= 0)
 					// sid not specified by user
 					if (!low_cn && pes && pes->highCN_pid != 0)
@@ -1030,10 +1030,7 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 					         pes_match_lang(spes, param->slang) &&
 					         !pes_match_lang(pes, param->slang))
 						selected = 0;
-					else if(param->spid == -1) {
-						if(prog_candidate == p)
-							selected = 1;
-					} else if(param->spid == es.pid)
+					else if(param->spid == es.pid)
 						selected = 1;
 					else if (p <= 0 || prog_candidate != p || !pes)
 						selected = 0;
@@ -1050,7 +1047,6 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 					else if(pes->component_tag < spes->component_tag)
 						selected = 1;
 				}
-#endif
 
 				if(selected)
 				{
