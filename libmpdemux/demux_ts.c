@@ -689,7 +689,7 @@ static int32_t progid_for_pid(ts_priv_t *priv, int pid, int32_t req)		//finds th
 	if(priv->pmt == NULL || pid >= 8192)
 		return -1;
 
-	i = priv->ts.pids[pid]->prog_idx;
+	i = (priv->ts.pids[pid]) ? priv->ts.pids[pid]->prog_idx : -1;
 	if (i >= 0) {
 		pmt = &priv->pmt[i];
 		if (pmt && (req <= 0 || req == pmt->progid))
@@ -3351,13 +3351,6 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 	}
 	if (pmt->es) {
 		mp_msg(MSGT_DEMUX, MSGL_V, "releasing the previous PMT.\n");
-		for (i = 0; i < pmt->es_cnt; i++) {
-			tss = priv->ts.pids[pmt->es[i].pid];
-			if (!tss || tss->prog_idx != idx)
-				continue;
-			free(tss);
-			priv->ts.pids[pmt->es[i].pid] = NULL;
-		}
 		free(pmt->es);
 		pmt->es = NULL;
 		pmt->es_cnt = 0;
