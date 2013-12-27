@@ -2255,7 +2255,7 @@ static int parse_pat(ts_priv_t * priv, int is_start, unsigned char *buff, int si
 	int skip;
 	unsigned char *ptr;
 	unsigned char *base;
-	int entries, i;
+	int entries, pmt_count, i;
 	uint16_t progid;
 	ts_section_t *section;
 	uint8_t ver;
@@ -2282,6 +2282,7 @@ static int parse_pat(ts_priv_t * priv, int is_start, unsigned char *buff, int si
 		mp_msg(MSGT_DEMUX, MSGL_V, "ignoreing an unchanged PAT\n");
 		return 0;
 	}
+	mp_msg(MSGT_DEMUX, MSGL_INFO, "found a new PAT.\n");
 	priv->pat.version_number = ver;
 	priv->pat.section_length = ((ptr[1] & 0x03) << 8 ) | ptr[2];
 	priv->pat.section_number = ptr[6];
@@ -2293,31 +2294,10 @@ static int parse_pat(ts_priv_t * priv, int is_start, unsigned char *buff, int si
 	}
 	mp_msg(MSGT_DEMUX, MSGL_V, "PARSE_PAT: section_len: %d, section %d/%d\n", priv->pat.section_length, priv->pat.section_number, priv->pat.last_section_number);
 
-	// reset old PAT & PMT */
 	if (priv->pat.progs) {
-		mp_msg(MSGT_DEMUX, MSGL_DBG2, "releasing the previous PAT & PMT's\n");
 		free(priv->pat.progs);
 		priv->pat.progs = NULL;
 		priv->pat.progs_cnt = 0;
-
-		for(i = 0; priv->pmt && i < priv->pmt_cnt; i++) {
-			int j;
-			ES_stream_t *tss;
-
-			free(priv->pmt[i].section.buffer);
-			// PES's can be shared amoung programs,
-			// but all programs are removed here anyway.
-			for(j = 0; j < priv->pmt[i].es_cnt; j++) {
-				tss = priv->ts.pids[priv->pmt[i].es[j].pid];
-				if (tss)
-					free(tss);
-				priv->ts.pids[priv->pmt[i].es[j].pid] = NULL;
-			}
-			free(priv->pmt[i].es);
-		}
-		free(priv->pmt);
-		priv->pmt = NULL;
-		priv->pmt_cnt = 0;
 	}
 
 	entries = (int) (priv->pat.section_length - 9) / 4;	//entries per section
@@ -2355,6 +2335,63 @@ static int parse_pat(ts_priv_t * priv, int is_start, unsigned char *buff, int si
 		mp_msg(MSGT_DEMUX, MSGL_V, "PROG: %d (%d-th of %d), PMT: %d\n", priv->pat.progs[idx].id, i+1, entries, priv->pat.progs[idx].pmt_pid);
 		mp_msg(MSGT_IDENTIFY, MSGL_V, "PROGRAM_ID=%d (0x%02X), PMT_PID: %d(0x%02X)\n",
 			progid, progid, priv->pat.progs[idx].pmt_pid, priv->pat.progs[idx].pmt_pid);
+	}
+
+	/* re-construct the pmt array, re-using old pmt's if possible */
+	/* firstly, mark the PMT's that are not contained in the current PAT */
+	for(i = 0; priv->pmt && i < priv->pmt_cnt; i++)
+		if (prog_idx_in_pat(priv, priv->pmt[i].progid) < 0) {
+			mp_msg(MSGT_DEMUX, MSGL_V, "deleted pmt:%d\n", priv->pmt[i].progid);
+			priv->pmt[i].progid = 0;
+		}
+
+	pmt_count = 0;
+	for(i = 0; priv->pmt && i < priv->pmt_cnt; i++) {
+		int j;
+		ES_stream_t *tss;
+
+		if (priv->pmt[i].progid == 0) {
+			// PES's can be shared amoung programs,
+			// so we cannot free it here. just invalidate idx
+			for(j = 0; j < priv->pmt[i].es_cnt; j++) {
+				tss = priv->ts.pids[priv->pmt[i].es[j].pid];
+				if (!tss)
+					continue;
+				tss->prog_idx = -1;
+				tss->es_idx = -1;
+			}
+			free(priv->pmt[i].es);
+			free(priv->pmt[i].section.buffer);
+			if (priv->pmt[i].od)
+				free(priv->pmt[i].od);
+			if (priv->pmt[i].mp4es)
+				free(priv->pmt[i].mp4es);
+			continue;
+		}
+		mp_msg(MSGT_DEMUX, MSGL_V, "re-using prog:%d.\n", priv->pmt[i].progid);
+		/* move priv->pmt[i] to priv->pmt[pmt_count] */
+		/* fix prog_idx of ES's */
+		for(j = 0; j < priv->pmt[i].es_cnt; j++) {
+			tss = priv->ts.pids[priv->pmt[i].es[j].pid];
+			if (!tss)
+				continue;
+			tss->prog_idx = pmt_count;
+		}
+		/* assert(pmt_count <= i) */
+		if (pmt_count != i)
+			memcpy(&priv->pmt[pmt_count], &priv->pmt[i], sizeof(pmt_t));
+		pmt_count ++;
+	}
+	priv->pmt_cnt = pmt_count;
+	if (pmt_count == 0 && priv->pmt) {
+		free(priv->pmt);
+		priv->pmt = NULL;
+	}
+	/* shrink priv->pmt */
+	if (pmt_count > 0) {
+		priv->pmt = realloc_struct(priv->pmt, pmt_count, sizeof(pmt_t));
+		if (!priv->pmt)
+			priv->pmt_cnt = 0;
 	}
 
 	return 1;
@@ -3329,7 +3366,7 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 
 	base = &(section->buffer[skip]);
 
-	mp_msg(MSGT_DEMUX, MSGL_V, "FILL_PMT(prog=%d), PMT_len: %d, IS_START: %d, TS_PID: %d, SIZE=%d, M=%d, ES_CNT=%d, IDX=%d, PMT_PTR=%p\n",
+	mp_msg(MSGT_DEMUX, MSGL_DBG2, "FILL_PMT(prog=%d), PMT_len: %d, IS_START: %d, TS_PID: %d, SIZE=%d, M=%d, ES_CNT=%d, IDX=%d, PMT_PTR=%p\n",
 		progid, pmt->section.buffer_len, is_start, pid, size, m, pmt->es_cnt, idx, pmt);
 
 	pmt->table_id = base[0];
@@ -3345,6 +3382,8 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 		mp_msg(MSGT_DEMUX, MSGL_DBG2, "Ignoreing an unchanged PMT.\n");
 		return 0;
 	}
+	mp_msg(MSGT_DEMUX, MSGL_V, "found a new PMT:%d v.%02X\n",
+		progid, (base[5] >> 1) & 0x1f);
 	if (calc_crc32(base, (((base[1] & 0x0f) << 8) | base[2]) + 3)) {
 		mp_msg(MSGT_DEMUX, MSGL_INFO, "broken PMT. CRC check failed.\n");
 		return 0;
@@ -3805,7 +3844,8 @@ static void reselect_streams(demuxer_t *demuxer)
 	int prev_apid, prev_vpid, prev_spid;
 	int pid;
 
-	mp_msg(MSGT_DEMUX, MSGL_INFO, "PMT info changed. re-selecting streams\n");
+	mp_msg(MSGT_DEMUX, MSGL_INFO,
+		"PMT(%d) info changed. re-selecting streams\n", priv->prog);
 	if (priv->prog == 0) {
 		mp_msg(MSGT_DEMUX, MSGL_ERR, "no PMT selected.\n");
 		return;
@@ -3850,7 +3890,7 @@ static void reselect_streams(demuxer_t *demuxer)
 			ts_add_stream(demuxer, priv->ts.pids[pid]);
 			demuxer->audio->id = priv->ts.streams[pid].id;
 			demuxer->audio->sh = priv->ts.streams[pid].sh;
-			ds_free_packs(demuxer->audio);
+			//ds_free_packs(demuxer->audio);
 
 			mp_msg(MSGT_DEMUX, MSGL_INFO, "audio stream pid: %#04hx -> %#04hx\n",
 				prev_apid, pid);
@@ -3867,7 +3907,7 @@ static void reselect_streams(demuxer_t *demuxer)
 			ts_add_stream(demuxer, priv->ts.pids[pid]);
 			demuxer->video->id = priv->ts.streams[pid].id;
 			demuxer->video->sh = priv->ts.streams[pid].sh;
-			ds_free_packs(demuxer->video);
+			//ds_free_packs(demuxer->video);
 
 			mp_msg(MSGT_DEMUX, MSGL_INFO, "video stream pid: %#04hx -> %#04hx(%d)\n",
 				prev_vpid, pid, priv->ts.streams[pid].id);
@@ -3884,7 +3924,7 @@ static void reselect_streams(demuxer_t *demuxer)
 			ts_add_stream(demuxer, priv->ts.pids[pid]);
 			demuxer->sub->id = priv->ts.streams[pid].id;
 			demuxer->sub->sh = priv->ts.streams[pid].sh;
-			ds_free_packs(demuxer->sub);
+			//ds_free_packs(demuxer->sub);
 			sub_set_lang_tag(demuxer->sub->sh);
 
 			mp_msg(MSGT_DEMUX, MSGL_INFO, "subpic stream pid: %#04hx -> %#04hx\n",

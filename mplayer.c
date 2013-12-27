@@ -1816,6 +1816,7 @@ static int generate_video_frame(sh_video_t *sh_video, demux_stream_t *d_video)
 {
     unsigned char *start;
     int in_size;
+    int changed;
     int hit_eof = 0;
     double pts;
 
@@ -1829,14 +1830,13 @@ static int generate_video_frame(sh_video_t *sh_video, demux_stream_t *d_video)
             break;
         current_module = "video_read_frame";
         // not every video format is frame-based, so we cannot use ds_get_packet
-        in_size = video_read_frame(sh_video, NULL, &start, force_fps);
+        in_size = video_read_frame2(sh_video, NULL, &start, force_fps, &changed);
         pts = sh_video->pts;
-        if (in_size == -2) {
+        if (changed) {
                 mp_msg(MSGT_CPLAYER, MSGL_INFO, "Video size has changed.\n");
                 uninit_player(INITIALIZED_VCODEC);
                 reinit_video_chain();
-                continue;
-        } else
+        }
 #ifdef CONFIG_DVDNAV
         // wait, still frame or EOF
         if (mpctx->stream->type == STREAMTYPE_DVDNAV && in_size < 0) {
@@ -2315,7 +2315,7 @@ static int fill_audio_out_buffers(void)
     }
     mp_msg(MSGT_AVSYNC, MSGL_DBG2, "-> %g\n", mpctx->delay);
     if (format_change) {
-        uninit_player(INITIALIZED_AO);
+        uninit_player(INITIALIZED_ACODEC | INITIALIZED_AO);
         reinit_audio_chain();
     }
     return 1;
@@ -2563,15 +2563,15 @@ static double update_video(int *blit_frame)
             int flush;
             current_module = "video_read_frame";
             frame_time     = sh_video->next_frame_time;
-            in_size = video_read_frame(sh_video, &sh_video->next_frame_time,
-                                       &start, force_fps);
+            in_size = video_read_frame2(sh_video, &sh_video->next_frame_time,
+                                       &start, force_fps, &size_changed);
             // size/aspect change
-            size_changed = in_size == -2;
+            //size_changed = in_size == -2;
             if (size_changed) {
                 mp_msg(MSGT_CPLAYER, MSGL_INFO, "Video size has changed.\n");
-                uninit_player(INITIALIZED_VCODEC);
+                uninit_player(INITIALIZED_VCODEC /* | INITIALIZED_VO */);
                 reinit_video_chain();
-                return 0.0;
+                //return 0.0;
             }
 #ifdef CONFIG_DVDNAV
             // wait, still frame or EOF

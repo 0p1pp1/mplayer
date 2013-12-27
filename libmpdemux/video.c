@@ -430,7 +430,7 @@ static void process_userdata(const unsigned char* buf,int len){
     fprintf(stderr, "'\n");
 }
 
-int video_read_frame(sh_video_t* sh_video,float* frame_time_ptr,unsigned char** start,int force_fps){
+int video_read_frame2(sh_video_t* sh_video,float* frame_time_ptr,unsigned char** start,int force_fps, int *changed){
     demux_stream_t *d_video=sh_video->ds;
     demuxer_t *demuxer=d_video->demuxer;
     float frame_time=1;
@@ -443,6 +443,7 @@ int video_read_frame(sh_video_t* sh_video,float* frame_time_ptr,unsigned char** 
     sh_video->needs_parsing = video_codec != VIDEO_OTHER;
 
     *start=NULL;
+    if (changed) *changed = 0;
 
   if(video_codec == VIDEO_MPEG12){
         int in_frame=0;
@@ -519,7 +520,8 @@ int video_read_frame(sh_video_t* sh_video,float* frame_time_ptr,unsigned char** 
         sh_video->stream_aspect = mpeg12_aspect_info(&picture);
         sh_video->disp_w = picture.display_picture_width;
         sh_video->disp_h = picture.display_picture_height;
-        return -2;  // mark size-change
+        if (changed) *changed = 1;
+        *start=videobuffer;
     }
   } else if(video_codec == VIDEO_MPEG4){
         while(videobuf_len<VIDEOBUFFER_SIZE-MAX_VIDEO_PACKET_SIZE){
@@ -680,4 +682,12 @@ int video_read_frame(sh_video_t* sh_video,float* frame_time_ptr,unsigned char** 
 
     if(frame_time_ptr) *frame_time_ptr=frame_time;
     return in_size;
+}
+
+int video_read_frame(sh_video_t* sh_video,float* frame_time_ptr,
+    unsigned char** start,int force_fps){
+    int ret, changed;
+
+    ret = video_read_frame2(sh_video, frame_time_ptr, start, force_fps, &changed);
+    return (changed > 0) ? -2 : ret;
 }
