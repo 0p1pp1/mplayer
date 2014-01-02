@@ -691,6 +691,9 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width,
 #endif
     flip = flags & VOFLAG_FLIPPING;
 
+    /* the following block caused decoding errors in draw_slice(),
+     * thus it was commented out. */
+#if 0
     if (image_format == format &&
         vid_width    == width  &&
         vid_height   == height) {
@@ -700,6 +703,7 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width,
         resize();
         return 0;
     }
+#endif
     image_format = format;
     vid_width    = width;
     vid_height   = height;
