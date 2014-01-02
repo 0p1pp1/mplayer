@@ -2423,7 +2423,7 @@ int reinit_video_chain(void)
     sh_video_t *const sh_video = mpctx->sh_video;
     double ar = -1.0;
     //================== Init VIDEO (codec & libvo) ==========================
-    if (!fixed_vo || !(initialized_flags & INITIALIZED_VO)) {
+    if (/*!fixed_vo ||*/ !(initialized_flags & INITIALIZED_VO)) {
         current_module = "preinit_libvo";
 
         //shouldn't we set dvideo->id=-2 when we fail?
