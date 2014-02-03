@@ -180,7 +180,6 @@ static int init(sh_audio_t *sh_audio)
    if (tries > 5 && lavc_context->codec_id == CODEC_ID_AAC){
        lavc_context->channels=2;
        lavc_context->sample_rate=48000;
-       lavc_context->sample_fmt=AV_SAMPLE_FMT_S16;
        lavc_context->bit_rate=128000;
        setup_format(sh_audio, lavc_context);
    }
