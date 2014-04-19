@@ -540,7 +540,7 @@ static void uninit(sh_video_t *sh){
             mp_msg(MSGT_DECVIDEO, MSGL_ERR, MSGTR_CantCloseCodec);
 
         av_freep(&avctx->extradata);
-        av_freep(&avctx->hwaccel_context);
+        // actx->hwaccel_context will be free'd in vo->uninit()
         av_freep(&avctx->slice_offset);
     }
 
