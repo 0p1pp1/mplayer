@@ -1804,6 +1804,8 @@ static int config_vaapi(uint32_t width, uint32_t height, uint32_t format)
             return -1;
         if (!is_direct_mapping())
             num_surfaces = FFMIN(2 * num_surfaces, MAX_VIDEO_SURFACES);
+        else // FIXME: extra surfaces needed for latency/buffering in decoder?
+            num_surfaces = FFMIN(num_surfaces + 3, MAX_VIDEO_SURFACES);
     }
     for (i = 0; i < num_surfaces; i++) {
         struct vaapi_surface *surface;
@@ -2513,6 +2515,13 @@ static struct vaapi_surface *get_surface(mp_image_t *mpi)
 
     if (mpi->type == MP_IMGTYPE_NUMBERED && is_direct_mapping()) {
         assert(mpi->number < va_num_surfaces);
+        if (mpi->number >= va_num_surfaces) {
+            mp_msg(MSGT_VO, MSGL_ERR,
+                "[vo_vaapi] get_surface(): too many requests for surfaces."
+                " %d/%d\n This should not happen. pls report this.\n",
+                mpi->number, va_num_surfaces);
+            return NULL;
+        }
         surface = va_free_surfaces[mpi->number];
         return surface;
     }
