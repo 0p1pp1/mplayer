@@ -1288,6 +1288,19 @@ static void free_video_specific(void)
         va_free_surfaces_tail_index = 0;
     }
 
+    if (!is_direct_mapping()) {
+        for (i = 0; i < MAX_OUTPUT_SURFACES; i++) {
+            if (!g_output_surfaces[i])
+                continue;
+            if (g_output_surfaces[i]->image.image_id != VA_INVALID_ID) {
+                vaDestroyImage(va_context->display,
+                               g_output_surfaces[i]->image.image_id);
+                g_output_surfaces[i]->image.image_id = VA_INVALID_ID;
+            }
+            free(g_output_surfaces[i]);
+            g_output_surfaces[i] = NULL;
+        }
+    }
     g_output_surface = 0;
     memset(g_output_surfaces, 0, sizeof(g_output_surfaces));
 
