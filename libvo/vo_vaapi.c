@@ -55,6 +55,12 @@
 #include <X11/extensions/Xrender.h>
 #endif
 
+#if defined(__GNUC__)
+#    define mp_unused __attribute__((unused))
+#else
+#    define mp_unused
+#endif
+
 /* Compatibility glue with upstream libva */
 #ifndef VA_SDS_VERSION
 #define VA_SDS_VERSION          0
@@ -235,7 +241,7 @@ static float                    cpu_usage;
 static int x11_error_code = 0;
 static int (*old_error_handler)(Display *, XErrorEvent *);
 
-static int error_handler(Display *dpy, XErrorEvent *error)
+static int error_handler(mp_unused Display *dpy, XErrorEvent *error)
 {
     x11_error_code = error->error_code;
     return 0;
@@ -733,6 +739,7 @@ static uint8_t *gen_osd_palette(const VAImage *image)
         case 'A': a_idx = i; break;
         }
     }
+    (void) is_rgb;
 
     if (r_idx != -1 && g_idx != -1 && b_idx != -1) {      /* RGB format */
         for (i = 0; i < image->num_palette_entries; i++) {
@@ -1427,7 +1434,7 @@ static void uninit(void)
     stats_exit();
 }
 
-static int config_x11(uint32_t width, uint32_t height,
+static int config_x11(mp_unused uint32_t width, mp_unused uint32_t height,
                       uint32_t display_width, uint32_t display_height,
                       uint32_t flags, char *title)
 {
@@ -1766,7 +1773,7 @@ static int reset_xrender_specific(void)
 }
 
 /* XXX: create a Pixmap as large as the display rect */
-static int config_xrender(unsigned int width, unsigned int height)
+static int config_xrender(mp_unused unsigned int width, mp_unused unsigned int height)
 {
     XWindowAttributes wattr;
     XRenderPictFormat *pictformat;
@@ -2417,7 +2424,7 @@ static int draw_slice(uint8_t * image[], int stride[],
     return VO_TRUE;
 }
 
-static int draw_frame(uint8_t * src[])
+static int draw_frame(mp_unused uint8_t * src[])
 {
     mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_X11_DrawFrameCalled);
 
