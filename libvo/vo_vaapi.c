@@ -695,11 +695,13 @@ static const struct {
     draw_alpha_func draw_alpha;
 }
 va_osd_info[] = {
+    /* HACK, because index'ed subpictures are not displayed correctly. */
+    { VA_FOURCC('B','G','R','A'), draw_alpha_rgb32 },
     { VA_FOURCC('I','A','4','4'), draw_alpha_IA44  },
     { VA_FOURCC('A','I','4','4'), draw_alpha_AI44  },
     { VA_FOURCC('I','A','8','8'), draw_alpha_IA88  },
     { VA_FOURCC('A','I','8','8'), draw_alpha_AI88  },
-    { VA_FOURCC('B','G','R','A'), draw_alpha_rgb32 },
+//    { VA_FOURCC('B','G','R','A'), draw_alpha_rgb32 },
     { VA_FOURCC('R','G','B','A'), draw_alpha_rgb32 },
     { 0, NULL }
 };
