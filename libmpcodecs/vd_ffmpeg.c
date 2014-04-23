@@ -330,6 +330,8 @@ static void set_format_params(struct AVCodecContext *avctx,
             avctx->draw_horiz_band = draw_slice;
             avctx->slice_flags = SLICE_FLAG_CODED_ORDER|SLICE_FLAG_ALLOW_FIELD;
             ctx->do_slices = 1;
+            if (!avctx->hwaccel_context)
+                avctx->hwaccel_context = mpcodecs_get_hwaccel_context(sh);
         }
     } else {
         set_dr_slice_settings(avctx, avctx->codec);
@@ -503,6 +505,10 @@ static int init(sh_video_t *sh){
         // HACK around badly placed checks in mpeg_mc_decode_init
         set_format_params(avctx, PIX_FMT_XVMC_MPEG2_IDCT);
     avctx->thread_count = lavc_param_threads;
+    /* hack for broken H.264 on vaapi */
+    if (!strcmp(video_hwaccel_name, "vaapi")
+        && lavc_codec->id != AV_CODEC_ID_MPEG2VIDEO)
+        avctx->thread_count = 1;
     avctx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
 
     /* open it */
@@ -513,7 +519,7 @@ static int init(sh_video_t *sh){
     }
     av_dict_free(&opts);
     // this is necessary in case get_format was never called and init_vo is
-    // too late e.g. for H.264 VDPAU
+    // too late e.g. for H.264 VDPAU and H.264 VAAPI
     set_format_params(avctx, avctx->pix_fmt);
     mp_msg(MSGT_DECVIDEO, MSGL_V, "INFO: libavcodec init OK!\n");
     return 1; //mpcodecs_config_vo(sh, sh->disp_w, sh->disp_h, IMGFMT_YV12);
