@@ -1,6 +1,9 @@
 # ISDB-T/SのDVBデバイスからの再生や 保存したTSファイル再生のためのパッチ #
 
 ## 変更履歴 ##
++ ver 1.3
+ - vaapiのサポート追加 (mplayer-vaapiから)
+
 + ver 1.2
  - デスクランブル機能の切り出し、外部ライブラリ(libdemulti2)への分離
  - 番組切り替わり時に映像/音声が乱れていた問題を軽減
@@ -78,6 +81,15 @@
    dvb://だけでなくTSファイル再生にも復号.
   (libdemulti2は配布していない。 APIについてはヘッダファイルdemulti2.hを参照)
 
+- VA API対応のマージ
+  例: mplayer -va vaapi -vo vaapi:colorspace=2 foo.ts
+  復号機能は -va vaapi で、表示機能は -vo vaapiで指定する。
+  複合ではffmpegを使うので、下記手順5.でvaapiがenableされるようにすること。
+  オプションについては mplayer -vo vaapi:xxx "some existing file"のようにして
+  無効なオプションをつけて実行するとヘルプが出力される。
+  注意： マルチスレッドで復号すると(-lavdopts threads=4 とか)絵が壊れたりクラッシュする.
+
+
 ## 本パッチの使い方・ビルド手順 (Fedoraの場合) ##
  レポジトリからパッチ済ソースのブランチ("isdb")を入手する。
  なお本ブランチは mplayer r36482 (gitだとcommit cb6ee05b)をベースとしたパッチとなる
@@ -122,7 +134,7 @@
 4. mplayerのconfigure
 
         (例) ./configure --prefix=/usr --confdir=/etc --libdir=/usr/lib64 \
-                 --enable-ass-internal --enable-menu
+                 --enable-ass-internal --enable-menu --enable-vaapi
 
   上の手順3.を省いていると、
   configureの途中でffmpegのソースを入手するか聞いてくるので、ENTER で了承する。
@@ -138,10 +150,18 @@
 
    - 字幕機能が要らない場合は--enable-ass-internal は必要ない
 
-5. ビルド
+   - VA API機能を使わないなら--enable-vaapiは不要。自動検出されないので明示的に指定。
+
+5. ffmpegのconfigure,ビルド (依存関係で下記6.から自動的に実行されるはずだが念の為)
+
+        cd ffmpeg
+        (例)./configure --enable-gpl --enable-nonfree --disable-doc --enable-pic
+        make; cd ..
+
+6. ビルド
 
    make
 
-6. 実行
+7. 実行
 
   (例) ./mplayer ~/foo.ts
