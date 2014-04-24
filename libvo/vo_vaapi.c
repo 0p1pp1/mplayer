@@ -33,7 +33,6 @@
 #include "libavutil/common.h"
 #include "libavcodec/vaapi.h"
 #include "gui/interface.h"
-#include "stats.h"
 #include <stdarg.h>
 
 #if CONFIG_GL
@@ -232,10 +231,6 @@ static eosd_draw_alpha_func     va_eosd_draw_alpha;
 ///< Flag: direct surface mapping: use mpi->number to select free VA surface?
 static int                      va_dm;
 
-///< Flag: gather run-time statistics (CPU usage, frequency)
-static int                      cpu_stats;
-static unsigned int             cpu_frequency;
-static float                    cpu_usage;
 
 // X error trap
 static int x11_error_code = 0;
@@ -1042,7 +1037,6 @@ static void setup_scaling(const char *scaling)
 
 static const opt_t subopts[] = {
     { "dm",          OPT_ARG_INT,  &va_dm,        (opt_test_f)int_012 },
-    { "stats",       OPT_ARG_BOOL, &cpu_stats,    NULL },
     { "deint",       OPT_ARG_INT,  &g_deint,      (opt_test_f)int_012 },
 #if USE_VAAPI_COLORSPACE
     { "colorspace",  OPT_ARG_INT,  &g_colorspace, (opt_test_f)int_012 },
@@ -1147,8 +1141,6 @@ static int preinit(const char *arg)
         setup_scaling(g_scaling_arg.str);
     }
 #endif
-
-    stats_init();
 
 #if CONFIG_GL
     if (gl_enabled && !init_mpglcontext(&gl_context, GLTYPE_X11))
@@ -1431,7 +1423,6 @@ static void uninit(void)
 #endif
     vo_x11_uninit();
 
-    stats_exit();
 }
 
 static int config_x11(mp_unused uint32_t width, mp_unused uint32_t height,
@@ -2303,13 +2294,6 @@ static void flip_page_glx(void)
         glPopMatrix();
     }
 
-    if (cpu_stats) {
-        gl_draw_rectangle(0, 0, vo_dwidth, 32, 0x000000ff);
-        glColor3f(1.0f, 1.0f, 1.0f);
-        glRasterPos2i(16, 20);
-        gl_printf("MPlayer: %.1f%% of CPU @ %u MHz", cpu_usage, cpu_frequency);
-    }
-
     if (gl_finish)
         mpglFinish();
     gl_context.swapGlBuffers(&gl_context);
@@ -2632,13 +2616,6 @@ static uint32_t draw_image(mp_image_t *mpi)
 
     g_output_surfaces[g_output_surface] = surface;
 
-    if (cpu_stats) {
-        static uint64_t ticks;
-        if ((ticks++ % 30) == 0) {
-            cpu_frequency = get_cpu_frequency();
-            cpu_usage = get_cpu_usage(CPU_USAGE_QUANTUM);
-        }
-    }
     return VO_TRUE;
 }
 

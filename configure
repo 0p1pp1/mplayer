@@ -670,7 +670,6 @@ _mencoder=yes
 _mplayer=yes
 _vaapi=auto
 _vaapi_glx=no
-_libgtop=auto
 _x11=auto
 _xshape=auto
 _xss=auto
@@ -1135,8 +1134,6 @@ for ac_option do
   --disable-twolame)    _twolame=no     ;;
   --enable-libcdio)     _libcdio=yes    ;;
   --disable-libcdio)    _libcdio=no     ;;
-  --enable-libgtop)     _libgtop=yes    ;;
-  --disable-libgtop)    _libgtop=no     ;;
   --enable-liblzo)      _liblzo=yes     ;;
   --disable-liblzo)     _liblzo=no      ;;
   --enable-libvorbis)   _libvorbis=yes  ;;
@@ -5074,31 +5071,6 @@ echores "$_corevideo"
 fi #if darwin
 
 
-echocheck "libgtop"
-if test "$_libgtop" = auto ; then
-  _libgtop=no
-  if $_pkg_config --exists 'libgtop-2.0' ; then
-
-cat > $TMPC << EOF
-#include <glibtop/cpu.h>
-#include <glibtop/proctime.h>
-int main(void) { return 0; }
-EOF
-cc_check $($_pkg_config --libs --cflags libgtop-2.0) && tmp_run && _libgtop=yes
-
-  fi
-fi
-echores "$_libgtop"
-
-if test "$_libgtop" = yes ; then
-  def_libgtop='#define CONFIG_LIBGTOP 1'
-  libs_mplayer="$libs_mplayer $($_pkg_config --libs libgtop-2.0)"
-  extra_cflags="$extra_cflags $($_pkg_config --cflags libgtop-2.0)"
-else
-  def_libgtop='#define CONFIG_LIBGTOP 0'
-fi
-
-
 echocheck "PNG support"
 if test "$_png" = auto ; then
   _png=no
@@ -8945,7 +8917,6 @@ $def_extern_asm
 $def_extern_prefix
 $def_iconv
 $def_kstat
-$def_libgtop
 $def_macosx_bundle
 $def_macosx_finder
 $def_maemo
