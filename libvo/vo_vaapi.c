@@ -993,7 +993,7 @@ static int is_direct_mapping_init(void)
     return 0;
 }
 
-static inline int is_direct_mapping(void)
+static int is_direct_mapping(void)
 {
     static int dm = -1;
     if (dm < 0) {
@@ -1266,11 +1266,6 @@ static void free_video_specific(void)
     }
 #endif
 
-    if (va_context && va_context->context_id) {
-        vaDestroyContext(va_context->display, va_context->context_id);
-        va_context->context_id = 0;
-    }
-
     if (va_free_surfaces) {
         for (i = 0; i < va_num_surfaces; i++) {
             if (!va_free_surfaces[i])
@@ -1280,7 +1275,6 @@ static void free_video_specific(void)
                                va_free_surfaces[i]->image.image_id);
                 va_free_surfaces[i]->image.image_id = VA_INVALID_ID;
             }
-            free(va_free_surfaces[i]);
             va_free_surfaces[i] = NULL;
         }
         free(va_free_surfaces);
@@ -1298,7 +1292,6 @@ static void free_video_specific(void)
                                g_output_surfaces[i]->image.image_id);
                 g_output_surfaces[i]->image.image_id = VA_INVALID_ID;
             }
-            free(g_output_surfaces[i]);
             g_output_surfaces[i] = NULL;
         }
     }
