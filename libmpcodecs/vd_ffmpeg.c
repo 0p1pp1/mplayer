@@ -506,7 +506,8 @@ static int init(sh_video_t *sh){
         set_format_params(avctx, PIX_FMT_XVMC_MPEG2_IDCT);
     avctx->thread_count = lavc_param_threads;
     /* HACK to fix broken H264, TS crash on switching image size. */
-    if (!strcmp(video_hwaccel_name, "vaapi"))
+    if (!strcmp(video_hwaccel_name, "vaapi")
+        && avctx->codec_id != AV_CODEC_ID_MPEG2VIDEO)
         avctx->thread_count = 1;
     avctx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
 
