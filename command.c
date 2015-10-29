@@ -159,7 +159,7 @@ static void update_global_sub_size(MPContext *mpctx)
 
     // update number of demuxer sub streams
     for (i = 0; i < MAX_S_STREAMS; i++)
-        if (mpctx->demuxer->s_streams[i])
+        if (mpctx->demuxer && mpctx->demuxer->s_streams[i])
             cnt++;
     if (cnt > mpctx->sub_counts[SUB_SOURCE_DEMUX])
         mpctx->sub_counts[SUB_SOURCE_DEMUX] = cnt;
@@ -172,7 +172,7 @@ static void update_global_sub_size(MPContext *mpctx)
     // update global_sub_pos if we auto-detected a demuxer sub
     if (mpctx->global_sub_pos == -1) {
         int sub_id = -1;
-        if (mpctx->demuxer->sub)
+        if (mpctx->demuxer && mpctx->demuxer->sub)
             sub_id = mpctx->demuxer->sub->id;
         if (sub_id < 0)
             sub_id = dvdsub_id;
@@ -1136,6 +1136,7 @@ static int mp_property_fullscreen(m_option_t *prop, int action, void *arg,
         M_PROPERTY_CLAMP(prop, *(int *) arg);
         if (vo_fs == !!*(int *) arg)
             return M_PROPERTY_OK;
+        /* Fallthrough to toggle */
     case M_PROPERTY_STEP_UP:
     case M_PROPERTY_STEP_DOWN:
 #ifdef CONFIG_GUI
@@ -1280,6 +1281,7 @@ static int mp_property_vo_flag(m_option_t *prop, int action, void *arg,
         M_PROPERTY_CLAMP(prop, *(int *) arg);
         if (*vo_var == !!*(int *) arg)
             return M_PROPERTY_OK;
+        /* Fallthrough to toggle */
     case M_PROPERTY_STEP_UP:
     case M_PROPERTY_STEP_DOWN:
         if (vo_config_count)
@@ -3627,6 +3629,7 @@ int run_command(MPContext *mpctx, mp_cmd_t *cmd)
             af_uninit(mpctx->mixer.afilter);
             af_init(mpctx->mixer.afilter);
         }
+        /* Fallthrough to add filters like for af_add */
     case MP_CMD_AF_ADD:
     case MP_CMD_AF_DEL:
         if (!sh_audio)

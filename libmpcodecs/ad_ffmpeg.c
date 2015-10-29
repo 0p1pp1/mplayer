@@ -46,6 +46,7 @@ LIBAD_EXTERN(ffmpeg)
 
 #include "libavcodec/avcodec.h"
 #include "libavutil/dict.h"
+#include "libavutil/channel_layout.h"
 
 struct adctx {
     int last_samplerate;
@@ -127,7 +128,8 @@ static int init(sh_audio_t *sh_audio)
 	lavc_context->block_align = sh_audio->wf->nBlockAlign;
 	lavc_context->bits_per_coded_sample = sh_audio->wf->wBitsPerSample;
     }
-    lavc_context->request_channels = audio_output_channels;
+    lavc_context->channel_layout = sh_audio->channel_layout;
+    lavc_context->request_channel_layout = av_get_default_channel_layout(audio_output_channels);
     lavc_context->codec_tag = sh_audio->format; //FOURCC
     lavc_context->codec_id = lavc_codec->id; // not sure if required, imho not --A'rpi
 
@@ -177,7 +179,7 @@ static int init(sh_audio_t *sh_audio)
    // for incorrectly sync'ed AAC streams, set temporal dummy parameters,
    // to avoid the abort of dec_audio.c::init_audio_codec() (from init_audio()).
    // those parameters will be properly re-configured later
-   if (tries > 5 && lavc_context->codec_id == CODEC_ID_AAC){
+   if (tries > 5 && lavc_context->codec_id == AV_CODEC_ID_AAC){
        lavc_context->channels=2;
        lavc_context->sample_rate=48000;
        lavc_context->bit_rate=128000;
@@ -197,6 +199,7 @@ static int init(sh_audio_t *sh_audio)
       default:
           return 0;
   }
+  setup_format(sh_audio, sh_audio->context);
   return 1;
 }
 
@@ -231,6 +234,45 @@ static av_always_inline void copy_samples_planar(size_t bps,
 {
     size_t s, c, o = 0;
 
+#if HAVE_NEON_INLINE
+    if (nb_channels == 2 && bps == 4) {
+        const unsigned char *src0 = src[0];
+        const unsigned char *src1 = src[1];
+        size_t aligned = nb_samples & ~7;
+        const unsigned char *src0_end = src0 + aligned*bps;
+        while (src0 < src0_end) {
+           __asm__ (
+               "vld1.32 {q0}, [%0]!\n\t"
+               "vld1.32 {q1}, [%1]!\n\t"
+               "vld1.32 {q2}, [%0]!\n\t"
+               "vld1.32 {q3}, [%1]!\n\t"
+               "vst2.32 {q0,q1}, [%2]!\n\t"
+               "vst2.32 {q2,q3}, [%2]!\n\t"
+               : "+&r"(src0), "+&r"(src1), "+&r"(dst)
+               :: "q0", "q1", "q2", "q3", "memory");
+        }
+        o += aligned*bps;
+        nb_samples -= aligned;
+    } else if (nb_channels == 2 && bps == 2) {
+        const unsigned char *src0 = src[0];
+        const unsigned char *src1 = src[1];
+        size_t aligned = nb_samples & ~15;
+        const unsigned char *src0_end = src0 + aligned*bps;
+        while (src0 < src0_end) {
+           __asm__ (
+               "vld1.16 {q0}, [%0]!\n\t"
+               "vld1.16 {q1}, [%1]!\n\t"
+               "vld1.16 {q2}, [%0]!\n\t"
+               "vld1.16 {q3}, [%1]!\n\t"
+               "vst2.16 {q0,q1}, [%2]!\n\t"
+               "vst2.16 {q2,q3}, [%2]!\n\t"
+               : "+&r"(src0), "+&r"(src1), "+&r"(dst)
+               :: "q0", "q1", "q2", "q3", "memory");
+        }
+        o += aligned*bps;
+        nb_samples -= aligned;
+    }
+#endif
     for (s = 0; s < nb_samples; s++) {
         for (c = 0; c < nb_channels; c++) {
             memcpy(dst, src[c] + o, bps);
@@ -281,7 +323,7 @@ static int decode_audio(sh_audio_t *sh_audio,unsigned char *buf,int minlen,int m
 {
     unsigned char *start=NULL;
     int y,len=-1, got_frame;
-    AVFrame *frame = avcodec_alloc_frame();
+    AVFrame *frame = av_frame_alloc();
 
     if (!frame)
         return AVERROR(ENOMEM);
@@ -350,6 +392,6 @@ static int decode_audio(sh_audio_t *sh_audio,unsigned char *buf,int minlen,int m
             break;
     }
 
-  av_free(frame);
+  av_frame_free(&frame);
   return len;
 }

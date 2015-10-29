@@ -1,8 +1,8 @@
 #!/usr/bin/python
 
 # Tool to compare MPlayer translation files against a base file. Reports
-# conflicting arguments, extra strings not present in the base file and
-# (optionally) missing strings.
+# conflicting definitions, mismatching arguments, extra definitions
+# not present in the base file and (optionally) missing definitions.
 
 # Written by Uoti Urpala
 
@@ -20,11 +20,20 @@ def parse(filename):
             while line and line[-1] == '\\':
                 line = it.next().strip()
             continue
-        _, name, value = line.split(None, 2)
+        try:
+            _, name, value = line.split(None, 2)
+        except ValueError:
+            if name in r:
+                continue
         value = value.strip('"')
         while line[-1] == '\\':
             line = it.next().strip()
             value += line.rstrip('\\').strip('"')
+        if name in r:
+            print 'Conflict: ', name
+            print r[name]
+            print value
+            print
         r[name] = value
     f.close()
     return r

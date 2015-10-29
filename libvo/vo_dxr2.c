@@ -33,6 +33,7 @@
 #include "config.h"
 #include "aspect.h"
 #include "video_out.h"
+#define NO_DRAW_SLICE
 #include "video_out_internal.h"
 #include "mp_msg.h"
 #include "m_option.h"
@@ -761,11 +762,6 @@ static void flip_page (void)
     sub_vo->flip_page();
 }
 
-static int draw_slice( uint8_t *srcimg[], int stride[], int w, int h, int x0, int y0 )
-{
-  return 0;
-}
-
 
 static int query_format(uint32_t format)
 {
@@ -935,6 +931,9 @@ static int control(uint32_t request, void *data)
   case VOCTRL_ONTOP:
     vo_x11_ontop();
     return VO_TRUE;
+  case VOCTRL_GUISUPPORT:
+    if (sub_vo) return sub_vo->control(VOCTRL_GUISUPPORT, NULL);
+    else return VO_FALSE;
   case VOCTRL_FULLSCREEN:
     if(!use_ol)
       return VO_NOTIMPL;

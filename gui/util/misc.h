@@ -16,19 +16,16 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef MPLAYER_GUI_CUT_H
-#define MPLAYER_GUI_CUT_H
+#ifndef MPLAYER_GUI_MISC_H
+#define MPLAYER_GUI_MISC_H
 
-#include <stddef.h>
+#include <stdio.h>
 
-/**
- * @brief Wraps #cutItemString():
- *        Extract a part of a string delimited by a separator character
- *        at most the size of @a out.
- */
-#define cutItem(in, out, sep, num) cutItemString(in, out, sep, num, sizeof(out))
+#include "list.h"
 
-void cutItemString(char *in, char *out, char sep, int num, size_t maxout);
-int cutItemToInt(char *in, char sep, int num);
+float constrain(float value);
+plItem **cue_playlist(const char *fname);
+char *fgetstr(char *str, int size, FILE *file);
+float msf2sec(const char *msf);
 
-#endif /* MPLAYER_GUI_CUT_H */
+#endif /* MPLAYER_GUI_MISC_H */

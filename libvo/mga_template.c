@@ -74,7 +74,7 @@ draw_slice_g200(uint8_t *image[], int stride[], int width,int height,int x,int y
 	int dst_stride[4] = { bespitch, bespitch };
 	uint8_t *dst[4];
 
-	av_image_fill_pointers(dst, PIX_FMT_NV12, mga_vid_config.src_height,
+	av_image_fill_pointers(dst, AV_PIX_FMT_NV12, mga_vid_config.src_height,
 	                       vid_data, dst_stride);
 
 	sws_scale(sws_ctx, image, stride, y, height, dst, dst_stride);
@@ -138,13 +138,6 @@ vo_mga_flip_page(void)
 	mga_next_frame=(mga_next_frame+1)%mga_vid_config.num_frames;
 	vid_data=frames[mga_next_frame];
 
-}
-
-static int
-draw_frame(uint8_t *src[])
-{
-    mp_msg(MSGT_VO,MSGL_WARN,"!!! mga::draw_frame() called !!!\n");
-    return 0;
 }
 
 static uint32_t get_image(mp_image_t *mpi){
@@ -315,7 +308,7 @@ static int control(uint32_t request, void *data)
       return VO_TRUE;
 #endif
 
-#if defined(VO_XMGA) && defined(CONFIG_GUI)
+#if defined(VO_XMGA)
   case VOCTRL_GUISUPPORT:
     return VO_TRUE;
 #endif
@@ -426,8 +419,8 @@ static int mga_init(int width,int height,unsigned int format){
 		}
 	}
 	if (mga_vid_config.card_type == MGA_G200) {
-		sws_ctx = sws_getContext(width, height, PIX_FMT_YUV420P,
-		                         width, height, PIX_FMT_NV12,
+		sws_ctx = sws_getContext(width, height, AV_PIX_FMT_YUV420P,
+		                         width, height, AV_PIX_FMT_NV12,
 		                         SWS_BILINEAR, NULL, NULL, NULL);
 		if (!sws_ctx) {
 			mp_msg(MSGT_VO, MSGL_FATAL,

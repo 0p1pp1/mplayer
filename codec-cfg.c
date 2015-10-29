@@ -216,6 +216,8 @@ static const struct {
     {"RGB64BE",     IMGFMT_RGB64BE},
     {"RGB48LE",     IMGFMT_RGB48LE},
     {"RGB48BE",     IMGFMT_RGB48BE},
+    {"BGR48LE",     IMGFMT_BGR48LE},
+    {"BGR48BE",     IMGFMT_BGR48BE},
     {"RGB4",        IMGFMT_RGB4},
     {"RGB8",        IMGFMT_RGB8},
     {"RGB15",       IMGFMT_RGB15},
@@ -254,6 +256,7 @@ static const struct {
     {"VDPAU_WMV3",  IMGFMT_VDPAU_WMV3},
     {"VDPAU_VC1",   IMGFMT_VDPAU_VC1},
     {"VDPAU_MPEG4", IMGFMT_VDPAU_MPEG4},
+    {"VDPAU_HEVC",  IMGFMT_VDPAU_HEVC},
 
     {"VAAPI_MPEG2", IMGFMT_VAAPI_MPEG2},
     {"VAAPI_MPEG4", IMGFMT_VAAPI_MPEG4},

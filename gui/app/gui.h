@@ -41,7 +41,16 @@
 /// StreamTypes that are permitted in a playlist
 #define isPlaylistStreamtype (guiInfo.StreamType == STREAMTYPE_FILE || guiInfo.StreamType == STREAMTYPE_STREAM)
 
+/// StreamTypes that permit seeking
+#define isSeekableStreamtype (guiInfo.StreamType != STREAMTYPE_STREAM && guiInfo.StreamType != STREAMTYPE_TV && guiInfo.StreamType != STREAMTYPE_DVB)
+
 /// Check whether @a x/y is inside the rectangle given by @a top @a x/y and @a bottom @a x/y.
 #define isInside(x, y, tx, ty, bx, by) ((x) > (tx) && (y) > (ty) && (x) < (bx) && (y) < (by))
+
+/// Check whether #guiItem @a item has a button (and thus a pressed state).
+#define hasButton(item) (item.type == itButton || item.type == itHPotmeter || item.type == itVPotmeter || item.type == itRPotmeter)
+
+/// Check whether #guiItem @a item utilizes member 'value'
+#define hasValue(item) (item.type == itHPotmeter || item.type == itVPotmeter || item.type == itRPotmeter || item.type == itPimage)
 
 #endif /* MPLAYER_GUI_GUI_H */

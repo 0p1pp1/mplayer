@@ -30,6 +30,8 @@ static const struct {
 } conversion_map[] = {
     { IMGFMT_ARGB,       AV_PIX_FMT_ARGB },
     { IMGFMT_BGRA,       AV_PIX_FMT_BGRA },
+    { IMGFMT_BGR48LE,    AV_PIX_FMT_BGR48LE },
+    { IMGFMT_BGR48BE,    AV_PIX_FMT_BGR48BE },
     { IMGFMT_BGR24,      AV_PIX_FMT_BGR24 },
     { IMGFMT_BGR16BE,    AV_PIX_FMT_RGB565BE },
     { IMGFMT_BGR16LE,    AV_PIX_FMT_RGB565LE },
@@ -134,25 +136,7 @@ static const struct {
     { IMGFMT_422P,       AV_PIX_FMT_YUVJ422P },
     { IMGFMT_444P,       AV_PIX_FMT_YUVJ444P },
     { IMGFMT_440P,       AV_PIX_FMT_YUVJ440P },
-
-    /* VA-API formats */
-    { IMGFMT_VAAPI_MPEG2,     AV_PIX_FMT_VAAPI_VLD },
-    { IMGFMT_VAAPI_MPEG2_IDCT,AV_PIX_FMT_VAAPI_IDCT },
-    { IMGFMT_VAAPI_MPEG2_MOCO,AV_PIX_FMT_VAAPI_MOCO },
-    { IMGFMT_VAAPI_MPEG4,     AV_PIX_FMT_VAAPI_VLD },
-    { IMGFMT_VAAPI_H263,      AV_PIX_FMT_VAAPI_VLD },
-    { IMGFMT_VAAPI_H264,      AV_PIX_FMT_VAAPI_VLD },
-    { IMGFMT_VAAPI_WMV3,      AV_PIX_FMT_VAAPI_VLD },
-    { IMGFMT_VAAPI_VC1,       AV_PIX_FMT_VAAPI_VLD },
-
-    { IMGFMT_XVMC_MOCO_MPEG2, AV_PIX_FMT_XVMC_MPEG2_MC },
-    { IMGFMT_XVMC_IDCT_MPEG2, AV_PIX_FMT_XVMC_MPEG2_IDCT },
-    { IMGFMT_VDPAU_MPEG1,     AV_PIX_FMT_VDPAU_MPEG1 },
-    { IMGFMT_VDPAU_MPEG2,     AV_PIX_FMT_VDPAU_MPEG2 },
-    { IMGFMT_VDPAU_H264,      AV_PIX_FMT_VDPAU_H264 },
-    { IMGFMT_VDPAU_WMV3,      AV_PIX_FMT_VDPAU_WMV3 },
-    { IMGFMT_VDPAU_VC1,       AV_PIX_FMT_VDPAU_VC1 },
-    { IMGFMT_VDPAU_MPEG4,     AV_PIX_FMT_VDPAU_MPEG4 },
+    { IMGFMT_XVMC_IDCT_MPEG2, AV_PIX_FMT_XVMC },
     { 0,                      AV_PIX_FMT_NONE }
 };
 
@@ -161,11 +145,12 @@ enum AVPixelFormat imgfmt2pixfmt(int fmt)
     int i;
     enum AVPixelFormat pix_fmt;
     if (IMGFMT_IS_VDPAU(fmt)) return AV_PIX_FMT_VDPAU;
+    if (IMGFMT_IS_VAAPI(fmt)) return AV_PIX_FMT_VAAPI;
     for (i = 0; conversion_map[i].fmt; i++)
         if (conversion_map[i].fmt == fmt)
             break;
     pix_fmt = conversion_map[i].pix_fmt;
-    if (pix_fmt == PIX_FMT_NONE)
+    if (pix_fmt == AV_PIX_FMT_NONE)
         mp_msg(MSGT_GLOBAL, MSGL_ERR, "Unsupported format %s\n", vo_format_name(fmt));
     return pix_fmt;
 }
@@ -174,7 +159,7 @@ int pixfmt2imgfmt(enum AVPixelFormat pix_fmt)
 {
     int i;
     int fmt;
-    for (i = 0; conversion_map[i].pix_fmt != PIX_FMT_NONE; i++)
+    for (i = 0; conversion_map[i].pix_fmt != AV_PIX_FMT_NONE; i++)
         if (conversion_map[i].pix_fmt == pix_fmt)
             break;
     fmt = conversion_map[i].fmt;

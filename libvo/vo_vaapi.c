@@ -2403,8 +2403,6 @@ static int draw_slice(uint8_t * image[], int stride[],
 
 static int draw_frame(mp_unused uint8_t * src[])
 {
-    mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_X11_DrawFrameCalled);
-
     return -1;
 }
 

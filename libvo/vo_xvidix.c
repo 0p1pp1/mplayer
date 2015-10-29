@@ -32,6 +32,7 @@
 
 #include "config.h"
 #include "video_out.h"
+#define NO_DRAW_FRAME
 #include "video_out_internal.h"
 
 #include <X11/Xlib.h>
@@ -316,7 +317,7 @@ static void check_events(void)
     return;
 }
 
-/* draw_osd, flip_page, draw_slice, draw_frame should be
+/* draw_osd, flip_page, draw_slice should be
    overwritten with vidix functions (vosub_vidix.c) */
 static void draw_osd(void)
 {
@@ -337,13 +338,6 @@ static int draw_slice(uint8_t * src[], int stride[],
 {
     mp_msg(MSGT_VO, MSGL_FATAL,
            "[xvidix] error: didn't used vidix draw_slice!\n");
-    return -1;
-}
-
-static int draw_frame(uint8_t * src[])
-{
-    mp_msg(MSGT_VO, MSGL_FATAL,
-           "[xvidix] error: didn't used vidix draw_frame!\n");
     return -1;
 }
 
@@ -402,6 +396,7 @@ static int control(uint32_t request, void *data)
             return VO_TRUE;
         case VOCTRL_FULLSCREEN:
             vo_x11_fullscreen();
+            /* Fallthrough to reconfigure panscan */
         case VOCTRL_SET_PANSCAN:
             if (vo_fs && (vo_panscan != vo_panscan_amount))
             {

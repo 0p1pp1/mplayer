@@ -44,7 +44,7 @@
 #define BLOCK 16
 
 //===========================================================================//
-static const uint8_t  __attribute__((aligned(8))) dither[8][8]={
+DECLARE_ASM_CONST(8, uint8_t, dither)[8][8]={
 {  0*4,  48*4,  12*4,  60*4,   3*4,  51*4,  15*4,  63*4, },
 { 32*4,  16*4,  44*4,  28*4,  35*4,  19*4,  47*4,  31*4, },
 {  8*4,  56*4,   4*4,  52*4,  11*4,  59*4,   7*4,  55*4, },
@@ -177,11 +177,16 @@ static void filter(struct vf_priv_s *p, uint8_t *dst[3], uint8_t *src[3], int ds
         const int x1= offset[i+count-1][0];
         const int y1= offset[i+count-1][1];
         int offset;
+        AVPacket pkt;
+        int ret, got_pkt;
         p->frame->data[0]= p->src[0] + x1 + y1 * p->frame->linesize[0];
         p->frame->data[1]= p->src[1] + x1/2 + y1/2 * p->frame->linesize[1];
         p->frame->data[2]= p->src[2] + x1/2 + y1/2 * p->frame->linesize[2];
 
-        avcodec_encode_video(p->avctx_enc[i], p->outbuf, p->outbuf_size, p->frame);
+        av_init_packet(&pkt);
+        pkt.data = p->outbuf;
+        pkt.size = p->outbuf_size;
+        avcodec_encode_video2(p->avctx_enc[i], &pkt, p->frame, &got_pkt);
         p->frame_dec = p->avctx_enc[i]->coded_frame;
 
         offset= (BLOCK-x1) + (BLOCK-y1)*p->frame_dec->linesize[0];
@@ -234,17 +239,18 @@ static int config(struct vf_instance *vf,
             avctx_enc->time_base= (AVRational){1,25};  // meaningless
             avctx_enc->gop_size = 300;
             avctx_enc->max_b_frames= 0;
-            avctx_enc->pix_fmt = PIX_FMT_YUV420P;
+            avctx_enc->pix_fmt = AV_PIX_FMT_YUV420P;
             avctx_enc->flags = CODEC_FLAG_QSCALE | CODEC_FLAG_LOW_DELAY;
             avctx_enc->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
             avctx_enc->global_quality= 123;
             av_dict_set(&opts, "no_bitstream", "1", 0);
-            avcodec_open2(avctx_enc, enc, &opts);
+            if (avcodec_open2(avctx_enc, enc, &opts) < 0)
+                return 0;
             av_dict_free(&opts);
             assert(avctx_enc->codec);
         }
-        vf->priv->frame= avcodec_alloc_frame();
-        vf->priv->frame_dec= avcodec_alloc_frame();
+        vf->priv->frame= av_frame_alloc();
+        vf->priv->frame_dec= av_frame_alloc();
 
         vf->priv->outbuf_size= (width + BLOCK)*(height + BLOCK)*10;
         vf->priv->outbuf= malloc(vf->priv->outbuf_size);
@@ -294,10 +300,10 @@ static int put_image(struct vf_instance *vf, mp_image_t *mpi, double pts){
         }
     }
 
-#if HAVE_MMX
+#if HAVE_MMX_INLINE
     if(gCpuCaps.hasMMX) __asm__ volatile ("emms\n\t");
 #endif
-#if HAVE_MMX2
+#if HAVE_MMXEXT_INLINE
     if(gCpuCaps.hasMMX2) __asm__ volatile ("sfence\n\t");
 #endif
 

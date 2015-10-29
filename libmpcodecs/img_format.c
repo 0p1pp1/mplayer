@@ -48,6 +48,8 @@ const char *vo_format_name(int format)
     case IMGFMT_BGR16:   return "BGR 16-bit";
     case IMGFMT_BGR24:   return "BGR 24-bit";
 //  case IMGFMT_BGR32:   return "BGR 32-bit";
+    case IMGFMT_BGR48LE: return "BGR 48-bit LE";
+    case IMGFMT_BGR48BE: return "BGR 48-bit BE";
     case IMGFMT_ABGR:    return "ABGR";
     case IMGFMT_BGRA:    return "BGRA";
     case IMGFMT_ARGB:    return "ARGB";
@@ -104,6 +106,7 @@ const char *vo_format_name(int format)
     case IMGFMT_422P: return "Planar 422P";
     case IMGFMT_422A: return "Planar 422P with alpha";
     case IMGFMT_411P: return "Planar 411P";
+    case IMGFMT_440P: return "Planar 440P";
     case IMGFMT_NV12: return "Planar NV12";
     case IMGFMT_NV21: return "Planar NV21";
     case IMGFMT_HM12: return "Planar NV12 Macroblock";
@@ -139,6 +142,7 @@ const char *vo_format_name(int format)
     case IMGFMT_VDPAU_MPEG4:     return "MPEG-4 Part 2 VDPAU acceleration";
     case IMGFMT_VDPAU_WMV3:      return "WMV3 VDPAU acceleration";
     case IMGFMT_VDPAU_VC1:       return "VC1 VDPAU acceleration";
+    case IMGFMT_VDPAU_HEVC:      return "HEVC VDPAU acceleration";
     case IMGFMT_VAAPI_MPEG2:     return "MPEG-2 VA-API Acceleration";
     case IMGFMT_VAAPI_MPEG2_IDCT: return "MPEG-2 VA-API Acceleration (Motion Compensation and IDCT)";
     case IMGFMT_VAAPI_MPEG2_MOCO: return "MPEG-2 VA-API Acceleration (Motion Compensation)";
@@ -232,7 +236,10 @@ int mp_get_chroma_shift(int format, int *x_shift, int *y_shift, int *component_b
     case IMGFMT_NV21:
         xs = 1;
         ys = 1;
+        // TODO: allowing this though currently breaks
+        // things all over the place.
         err = 1;
+        break;
     default:
         err = 1;
         break;

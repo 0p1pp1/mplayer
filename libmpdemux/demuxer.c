@@ -734,7 +734,7 @@ int ds_fill_buffer(demux_stream_t *ds)
         // This needs to be enough for at least 1 second of packets
         // since libavformat mov demuxer does not try to interleave
         // with more than 1s precision.
-        if (ds->fill_count > 80)
+        if (!force_ni && ds->fill_count > 80)
             break;
         // avoid printing the "too many ..." message over and over
         if (ds->eof)
@@ -1507,7 +1507,8 @@ double demuxer_get_time_length(demuxer_t *demuxer)
     sh_audio_t *sh_audio = demuxer->audio->sh;
     // <= 0 means DEMUXER_CTRL_NOTIMPL or DEMUXER_CTRL_DONTKNOW
     if (demux_control
-        (demuxer, DEMUXER_CTRL_GET_TIME_LENGTH, (void *) &get_time_ans) <= 0) {
+        (demuxer, DEMUXER_CTRL_GET_TIME_LENGTH, (void *) &get_time_ans) <= 0 &&
+        stream_control(demuxer->stream, STREAM_CTRL_GET_TIME_LENGTH, (void *)&get_time_ans) != STREAM_OK) {
         if (sh_video && sh_video->i_bps && sh_audio && sh_audio->i_bps)
             get_time_ans = (double) (demuxer->movi_end -
                                      demuxer->movi_start) / (sh_video->i_bps +
@@ -1954,6 +1955,22 @@ int demuxer_default_audio_track(demuxer_t *d)
         sh_audio_t *sh = d->a_streams[(start + i) % MAX_A_STREAMS];
         if (sh && sh->default_track)
             return sh->aid;
+    }
+    return -1;
+}
+
+int demuxer_default_video_track(demuxer_t *d)
+{
+    int i;
+    for (i = 0; i < MAX_V_STREAMS; ++i) {
+        sh_video_t *sh = d->v_streams[i];
+        if (sh && sh->default_track)
+            return sh->vid;
+    }
+    for (i = 0; i < MAX_V_STREAMS; ++i) {
+        sh_video_t *sh = d->v_streams[i];
+        if (sh)
+            return sh->vid;
     }
     return -1;
 }

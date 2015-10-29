@@ -31,6 +31,7 @@
 #include "mp_msg.h"
 #include "subopt-helper.h"
 #include "video_out.h"
+#define NO_DRAW_FRAME
 #include "video_out_internal.h"
 #include "libmpcodecs/vf.h"
 #include "sub/font_load.h"
@@ -165,7 +166,7 @@ static int texture_width;
 static int texture_height;
 static int mpi_flipped;
 static int vo_flipped;
-static int ass_border_x, ass_border_y;
+static int ass_border_l, ass_border_r, ass_border_t, ass_border_b;
 
 static unsigned int slice_height = 1;
 
@@ -202,6 +203,8 @@ static void resize(void) {
     geometry(&left, &top, &w, &h, vo_dwidth, vo_dheight);
     top = vo_dheight - h - top;
     mpglViewport(left, top, w, h);
+  } else if (vo_fs) {
+    mpglViewport(vo_fs_border_l, vo_fs_border_b, vo_dwidth, vo_dheight);
   } else
     mpglViewport(0, 0, vo_dwidth, vo_dheight);
 
@@ -213,7 +216,7 @@ static void resize(void) {
     }
   }
 
-  ass_border_x = ass_border_y = 0;
+  ass_border_l = ass_border_t = 0;
   if (aspect_scaling() && use_aspect) {
     int new_w, new_h;
     double scale_x, scale_y;
@@ -234,8 +237,10 @@ static void resize(void) {
     if (vo_rotate & 1) {
       int tmp = new_w; new_w = new_h; new_h = tmp;
     }
-    ass_border_x = apply_border_pos(draw_width, new_w, vo_border_pos_x);
-    ass_border_y = apply_border_pos(draw_height, new_h, vo_border_pos_y);
+    ass_border_l = apply_border_pos(draw_width, new_w, vo_border_pos_x);
+    ass_border_t = apply_border_pos(draw_height, new_h, vo_border_pos_y);
+    ass_border_r = draw_width  - new_w - ass_border_l;
+    ass_border_b = draw_height - new_h - ass_border_t;
   }
   mpglLoadMatrixf(video_matrix);
 
@@ -839,7 +844,7 @@ static void draw_osd(void)
     clearOSD();
     osd_w = scaled_osd ? image_width  : draw_width;
     osd_h = scaled_osd ? image_height : draw_height;
-    vo_draw_text_ext(osd_w, osd_h, ass_border_x, ass_border_y, ass_border_x, ass_border_y,
+    vo_draw_text_ext(osd_w, osd_h, ass_border_l, ass_border_t, ass_border_r, ass_border_b,
                      image_width, image_height, create_osd_texture);
   }
   if (vo_doublebuffering) do_render_osd(RENDER_OSD);
@@ -933,7 +938,7 @@ static int draw_slice(uint8_t *src[], int stride[], int w,int h,int x,int y)
 
 static int get_pbo_image(mp_image_t *mpi) {
   int needed_size;
-  if (!mpglGenBuffers || !mpglBindBuffer || !mpglBufferData || !mpglMapBuffer) {
+  if (!mpglGenBuffers || !mpglBindBuffer || !mpglBufferData || !mpglMapBufferRange) {
     if (!err_shown)
       mp_msg(MSGT_VO, MSGL_ERR, "[gl] extensions missing for dr\n"
                                 "Expect a _major_ speed penalty\n");
@@ -963,7 +968,7 @@ static int get_pbo_image(mp_image_t *mpi) {
                      NULL, GL_DYNAMIC_DRAW);
     }
     if (!gl_bufferptr)
-      gl_bufferptr = mpglMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
+      gl_bufferptr = mpglMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, needed_size, GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
     mpi->priv = gl_bufferptr;
     mpi->planes[0] = (uint8_t *)gl_bufferptr + (-(intptr_t)gl_bufferptr & 31);
     mpglBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
@@ -1001,9 +1006,9 @@ static int get_pbo_image(mp_image_t *mpi) {
       }
       if (!gl_bufferptr_uv[0]) {
         mpglBindBuffer(GL_PIXEL_UNPACK_BUFFER, gl_buffer_uv[0]);
-        gl_bufferptr_uv[0] = mpglMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
+        gl_bufferptr_uv[0] = mpglMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, mpi->stride[1] * mpi->height, GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
         mpglBindBuffer(GL_PIXEL_UNPACK_BUFFER, gl_buffer_uv[1]);
-        gl_bufferptr_uv[1] = mpglMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
+        gl_bufferptr_uv[1] = mpglMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, mpi->stride[1] * mpi->height, GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
       }
       mpi->planes[1] = gl_bufferptr_uv[0];
       mpi->planes[2] = gl_bufferptr_uv[1];
@@ -1132,12 +1137,6 @@ static uint32_t draw_image(mp_image_t *mpi) {
 skip_upload:
   if (vo_doublebuffering) do_render();
   return VO_TRUE;
-}
-
-static int
-draw_frame(uint8_t *src[])
-{
-  return VO_ERROR;
 }
 
 static int
@@ -1319,6 +1318,7 @@ static int preinit_internal(const char *arg, int allow_sw)
               "    3: as 1 but without using a lookup texture.\n"
               "    4: experimental unsharp masking (sharpening).\n"
               "    5: experimental unsharp masking (sharpening) with larger radius.\n"
+              "   64: nearest neighbor scaling.\n"
               "  cscale=<n>\n"
               "    as lscale but for chroma (2x slower with little visible effect).\n"
               "  filter-strength=<value>\n"
@@ -1436,8 +1436,10 @@ static int control(uint32_t request, void *data)
       r->mt = r->mb = r->ml = r->mr = 0;
       if (scaled_osd) {r->w = image_width; r->h = image_height;}
       else if (aspect_scaling()) {
-        r->ml = r->mr = ass_border_x;
-        r->mt = r->mb = ass_border_y;
+        r->ml = ass_border_l;
+        r->mr = ass_border_r;
+        r->mt = ass_border_t;
+        r->mb = ass_border_b;
       }
     }
     return VO_TRUE;

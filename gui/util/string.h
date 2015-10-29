@@ -19,19 +19,29 @@
 #ifndef MPLAYER_GUI_STRING_H
 #define MPLAYER_GUI_STRING_H
 
-#include <stdio.h>
+#include <stddef.h>
 
+/**
+ * @brief Wraps #cutString():
+ *        Extract a part of a string delimited by a separator character
+ *        at most the size of @a out.
+ */
+#define cutStr(in, out, sep, num) cutString(in, out, sep, num, sizeof(out))
+
+int cutInt(char *in, char sep, int num);
+void cutString(char *in, char *out, char sep, int num, size_t maxout);
 char *decomment(char *in);
-char *fgetstr(char *str, int size, FILE *file);
+char *dequote(char *in);
+char *despace(char *in);
 char *gstrchr(const char *str, int c);
 int gstrcmp(const char *a, const char *b);
 char *gstrdup(const char *str);
 int gstrncmp(const char *a, const char *b, size_t n);
+const char *ltrim(const char *in);
 void setddup(char **old, const char *dir, const char *name);
 void setdup(char **old, const char *str);
 char *strlower(char *in);
 char *strswap(char *in, char from, char to);
-char *TranslateFilename(int how, char *fname, size_t maxlen);
-char *trim(char *in);
+char *strupper(char *in);
 
 #endif /* MPLAYER_GUI_STRING_H */

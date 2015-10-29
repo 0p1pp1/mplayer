@@ -59,8 +59,8 @@ static int gtkInitialized;
  *
  * @param theme theme to load the icon from
  * @param size size of the icon to load
- * @param gdkIcon location to store a pointer to the created pixmap
- * @param gdkIconMask location to store a pointer to the created mask
+ * @param gdkIcon memory location to store a pointer to the created pixmap
+ * @param gdkIconMask memory location to store a pointer to the created mask
  *
  * @return #True (ok) or #False (error)
  */
@@ -96,7 +96,7 @@ static int gtkLoadIcon(GtkIconTheme *theme, gint size, GdkPixmap **gdkIcon, GdkB
 
         g_object_unref(pixbuf);
     } else
-        mp_msg(MSGT_GPLAYER, MSGL_WARN, MSGTR_ICONERROR, guiIconName, size);
+        mp_msg(MSGT_GPLAYER, MSGL_WARN, MSGTR_GUI_MSG_IconError, guiIconName, size);
 
     /* start up GTK which realizes the pixmaps */
     gtk_main_iteration_do(FALSE);
@@ -113,9 +113,7 @@ void gtkInit(char *display_name)
 {
     int argc = 0;
     char *arg[3], **argv = arg;
-#ifdef CONFIG_GTK2
     char *env;
-#endif
     GtkIconTheme *theme;
     GdkPixmap *gdkIcon;
     GdkBitmap *gdkIconMask;
@@ -129,14 +127,12 @@ void gtkInit(char *display_name)
         arg[argc++] = display_name; // to open the requested display for the GUI, too.
     }
 
-#ifdef CONFIG_GTK2
     gtk_disable_setlocale();
 
     env = getenv("G_FILENAME_ENCODING");
 
     if ((!env && getenv("G_BROKEN_FILENAMES")) || (gstrncmp(env, "@locale", 7) == 0))
-        mp_msg(MSGT_GPLAYER, MSGL_WARN, MSGTR_LOCALE_ENCODING);
-#endif
+        mp_msg(MSGT_GPLAYER, MSGL_WARN, MSGTR_GUI_MSG_LocaleEncoding);
 
     gtk_init(&argc, &argv);
     wsSetErrorHandler();      // GDK has just set its own handler
@@ -196,20 +192,30 @@ void gtkMessageBox(int type, const gchar *str)
 
     switch (type) {
     case MSGBOX_FATAL:
-        gtk_window_set_title(GTK_WINDOW(MessageBox), MSGTR_MSGBOX_LABEL_FatalError);
+        gtk_window_set_title(GTK_WINDOW(MessageBox), MSGTR_GUI_ErrorFatal);
+        gtk_widget_hide(InformationPixmap);
         gtk_widget_hide(WarningPixmap);
         gtk_widget_show(ErrorPixmap);
         break;
 
     case MSGBOX_ERROR:
-        gtk_window_set_title(GTK_WINDOW(MessageBox), MSGTR_MSGBOX_LABEL_Error);
+        gtk_window_set_title(GTK_WINDOW(MessageBox), MSGTR_GUI_Error);
+        gtk_widget_hide(InformationPixmap);
         gtk_widget_hide(WarningPixmap);
         gtk_widget_show(ErrorPixmap);
         break;
 
     case MSGBOX_WARNING:
-        gtk_window_set_title(GTK_WINDOW(MessageBox), MSGTR_MSGBOX_LABEL_Warning);
+        gtk_window_set_title(GTK_WINDOW(MessageBox), MSGTR_GUI_Warning);
+        gtk_widget_hide(InformationPixmap);
         gtk_widget_show(WarningPixmap);
+        gtk_widget_hide(ErrorPixmap);
+        break;
+
+    case MSGBOX_INFORMATION:
+        gtk_window_set_title(GTK_WINDOW(MessageBox), MSGTR_GUI_Information);
+        gtk_widget_show(InformationPixmap);
+        gtk_widget_hide(WarningPixmap);
         gtk_widget_hide(ErrorPixmap);
         break;
     }
@@ -297,6 +303,11 @@ void gtkShow(int type, char *param)
 
     case evLoadAudioFile:
         ShowFileSelector(FILESELECT_AUDIO);
+        gtkSetLayer(FileSelector);
+        break;
+
+    case evPlayImage:
+        ShowFileSelector(FILESELECT_IMAGE);
         gtkSetLayer(FileSelector);
         break;
 

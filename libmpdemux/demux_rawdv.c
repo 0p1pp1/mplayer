@@ -50,7 +50,7 @@ typedef struct
 
 static void demux_seek_rawdv(demuxer_t *demuxer,float rel_seek_secs,float audio_delay,int flags)
 {
-   rawdv_frames_t *frames = (rawdv_frames_t *)demuxer->priv;
+   rawdv_frames_t *frames = demuxer->priv;
    sh_video_t *sh_video = demuxer->video->sh;
    off_t newpos=(flags&SEEK_ABSOLUTE)?0:frames->current_frame;
    if(flags&SEEK_FACTOR)
@@ -98,10 +98,7 @@ static int rawdv_check_file(demuxer_t *demuxer)
        && ((td->height==576) || (td->height==480)))
       result=1;
    dv_decoder_free(td);
-   if (result)
-      return DEMUXER_TYPE_RAWDV;
-   else
-      return 0;
+   return result ? DEMUXER_TYPE_RAWDV : 0;
 }
 
 // return value:
@@ -109,7 +106,7 @@ static int rawdv_check_file(demuxer_t *demuxer)
 //     1 = successfully read a packet
 static int demux_rawdv_fill_buffer(demuxer_t *demuxer, demux_stream_t *ds)
 {
-   rawdv_frames_t *frames = (rawdv_frames_t *)demuxer->priv;
+   rawdv_frames_t *frames = demuxer->priv;
    demux_packet_t* dp_video=NULL;
    sh_video_t *sh_video = demuxer->video->sh;
    int bytes_read=0;
@@ -121,8 +118,10 @@ static int demux_rawdv_fill_buffer(demuxer_t *demuxer, demux_stream_t *ds)
 
    dp_video=new_demux_packet(frames->frame_size);
    bytes_read=stream_read(demuxer->stream,dp_video->buffer,frames->frame_size);
-   if (bytes_read<frames->frame_size)
+   if (bytes_read<frames->frame_size) {
+      free_demux_packet(dp_video);
       return 0;
+   }
    dp_video->pts=frames->current_frame/sh_video->fps;
    dp_video->pos=frames->current_filepos;
    dp_video->flags=0;
@@ -144,7 +143,7 @@ static demuxer_t* demux_open_rawdv(demuxer_t* demuxer)
 {
    unsigned char dv_frame[DV_PAL_FRAME_SIZE];
    sh_video_t *sh_video = NULL;
-   rawdv_frames_t *frames = malloc(sizeof(rawdv_frames_t));
+   rawdv_frames_t *frames = calloc(1, sizeof(*frames));
    dv_decoder_t *dv_decoder=NULL;
 
    mp_msg(MSGT_DEMUXER,MSGL_V,"demux_open_rawdv() end_pos %"PRId64"\n",(int64_t)demuxer->stream->end_pos);
@@ -158,25 +157,23 @@ static demuxer_t* demux_open_rawdv(demuxer_t* demuxer)
 
    //read params from this frame
    dv_decoder=dv_decoder_new(TRUE,TRUE,FALSE);
+   if (!dv_decoder)
+	   goto err_out;
    dv_decoder->quality=DV_QUALITY_BEST;
 
    if (dv_parse_header(dv_decoder, dv_frame) == -1)
-	   return NULL;
+	   goto err_out;
 
    // create a new video stream header
    sh_video = new_sh_video(demuxer, 0);
    if (!sh_video)
-	   return NULL;
+	   goto err_out;
 
    // make sure the demuxer knows about the new video stream header
    // (even though new_sh_video() ought to take care of it)
    demuxer->seekable = 1;
+   demuxer->video->id = 0;
    demuxer->video->sh = sh_video;
-
-   // make sure that the video demuxer stream header knows about its
-   // parent video demuxer stream (this is getting wacky), or else
-   // video_read_properties() will choke
-   sh_video->ds = demuxer->video;
 
    // custom fourcc for internal MPlayer use
 //   sh_video->format = mmioFOURCC('R', 'A', 'D', 'V');
@@ -184,7 +181,7 @@ static demuxer_t* demux_open_rawdv(demuxer_t* demuxer)
 
    sh_video->disp_w = dv_decoder->width;
    sh_video->disp_h = dv_decoder->height;
-   mp_msg(MSGT_DEMUXER,MSGL_V,"demux_open_rawdv() frame_size: %d w: %d h: %d dif_seq: %d system: %d\n",dv_decoder->frame_size,dv_decoder->width, dv_decoder->height,dv_decoder->num_dif_seqs,dv_decoder->system);
+   mp_msg(MSGT_DEMUXER,MSGL_V,"demux_open_rawdv() frame_size: %d w: %d h: %d dif_seq: %d system: %d\n",(int)dv_decoder->frame_size,dv_decoder->width, dv_decoder->height,dv_decoder->num_dif_seqs,dv_decoder->system);
 
    sh_video->fps= (dv_decoder->system==e_dv_system_525_60?29.97:25);
    sh_video->frametime = 1.0/sh_video->fps;
@@ -205,12 +202,11 @@ static demuxer_t* demux_open_rawdv(demuxer_t* demuxer)
    frames->frame_size=dv_decoder->frame_size;
    frames->frame_number=demuxer->stream->end_pos/frames->frame_size;
 
-   mp_msg(MSGT_DEMUXER,MSGL_V,"demux_open_rawdv() seek to %llu, size: %d, dv_dec->frame_size: %d\n",frames->current_filepos,frames->frame_size, dv_decoder->frame_size);
+   mp_msg(MSGT_DEMUXER,MSGL_V,"demux_open_rawdv() seek to %llu, size: %d, dv_dec->frame_size: %d\n",(long long unsigned)frames->current_filepos,frames->frame_size, (int)dv_decoder->frame_size);
     if (dv_decoder->audio != NULL && demuxer->audio->id>=-1){
        sh_audio_t *sh_audio =  new_sh_audio(demuxer, 0, NULL);
        demuxer->audio->id = 0;
 	    demuxer->audio->sh = sh_audio;
-	    sh_audio->ds = demuxer->audio;
        mp_msg(MSGT_DEMUXER,MSGL_V,"demux_open_rawdv() chan: %d samplerate: %d\n",dv_decoder->audio->num_channels,dv_decoder->audio->frequency );
        // custom fourcc for internal MPlayer use
        sh_audio->format = mmioFOURCC('R', 'A', 'D', 'V');
@@ -231,28 +227,30 @@ static demuxer_t* demux_open_rawdv(demuxer_t* demuxer)
    dv_decoder_free(dv_decoder);  //we keep this in the context of both stream headers
    demuxer->priv=frames;
    return demuxer;
+
+err_out:
+   if (dv_decoder) dv_decoder_free(dv_decoder);
+   free(frames);
+   return NULL;
 }
 
 static void demux_close_rawdv(demuxer_t* demuxer)
 {
-   rawdv_frames_t *frames = (rawdv_frames_t *)demuxer->priv;
-
-   if(frames==0)
-      return;
-  free(frames);
+    free(demuxer->priv);
+    demuxer->priv = NULL;
 }
 
 static int demux_rawdv_control(demuxer_t *demuxer,int cmd, void *arg) {
-    rawdv_frames_t *frames = (rawdv_frames_t *)demuxer->priv;
+    rawdv_frames_t *frames = demuxer->priv;
     sh_video_t *sh_video=demuxer->video->sh;
 
     switch(cmd) {
         case DEMUXER_CTRL_GET_TIME_LENGTH:
-            *((double *)arg)=(double)frames->frame_number / sh_video->fps;
+            *(double *)arg=(double)frames->frame_number / sh_video->fps;
             return DEMUXER_CTRL_OK;
 
         case DEMUXER_CTRL_GET_PERCENT_POS:
-            *((int *)arg)=(int)(frames->current_frame * 100. / frames->frame_number);
+            *(int *)arg=(int)(frames->current_frame * 100. / frames->frame_number);
             return DEMUXER_CTRL_OK;
 
         default:

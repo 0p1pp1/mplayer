@@ -108,27 +108,19 @@ static demuxer_t* demux_open_roq(demuxer_t* demuxer)
   sh_video_t *sh_video = NULL;
   sh_audio_t *sh_audio = NULL;
 
-  roq_data_t *roq_data = malloc(sizeof(roq_data_t));
-  int chunk_id;
-  int chunk_size;
-  int chunk_arg;
+  roq_data_t *roq_data = calloc(1, sizeof(*roq_data));
   int last_chunk_id = 0;
   int largest_audio_chunk = 0;
   int fps;
-
-  roq_data->total_chunks = 0;
-  roq_data->current_chunk = 0;
-  roq_data->total_video_chunks = 0;
-  roq_data->chunks = NULL;
 
   // position the stream and start traversing
   stream_seek(demuxer->stream, 6);
   fps = stream_read_word_le(demuxer->stream);
   while (!stream_eof(demuxer->stream))
   {
-    chunk_id = stream_read_word_le(demuxer->stream);
-    chunk_size = stream_read_dword_le(demuxer->stream);
-    chunk_arg = stream_read_word_le(demuxer->stream);
+    int chunk_id = stream_read_word_le(demuxer->stream);
+    int chunk_size = stream_read_dword_le(demuxer->stream);
+    int chunk_arg = stream_read_word_le(demuxer->stream);
 
     // this is the only useful header info in the file
     if (chunk_id == RoQ_INFO)
@@ -144,10 +136,8 @@ static demuxer_t* demux_open_roq(demuxer_t* demuxer)
         // this is a good opportunity to create a video stream header
         sh_video = new_sh_video(demuxer, 0);
         // make sure the demuxer knows about the new stream header
+        demuxer->video->id = 0;
         demuxer->video->sh = sh_video;
-        // make sure that the video demuxer stream header knows about its
-        // parent video demuxer stream
-        sh_video->ds = demuxer->video;
 
         sh_video->disp_w = stream_read_word_le(demuxer->stream);
         sh_video->disp_h = stream_read_word_le(demuxer->stream);
@@ -172,9 +162,6 @@ static demuxer_t* demux_open_roq(demuxer_t* demuxer)
         // make sure the demuxer knows about the new stream header
         demuxer->audio->id = 0;
         demuxer->audio->sh = sh_audio;
-        // make sure that the audio demuxer stream header knows about its
-        // parent audio demuxer stream
-        sh_audio->ds = demuxer->audio;
 
         // go through the bother of making a WAVEFORMATEX structure
         sh_audio->wf = malloc(sizeof(*sh_audio->wf));

@@ -30,6 +30,7 @@
 
 #include "config.h"
 #include "video_out.h"
+#define NO_DRAW_FRAME
 #include "video_out_internal.h"
 #include "libmpcodecs/vf.h"
 #include "fastmemcpy.h"
@@ -1047,12 +1048,6 @@ draw_alpha( int x0, int y0,
 }
 
 static int
-draw_frame( uint8_t * src[] )
-{
-     return -1;
-}
-
-static int
 draw_slice( uint8_t * src[], int stride[], int w, int h, int x, int y )
 {
      uint8_t *dst;
@@ -1294,7 +1289,7 @@ get_image( mp_image_t *mpi )
           }
 
           mpi->flags |= MP_IMGFLAG_DIRECT;
-          mpi->priv = (void *) buf;
+          mpi->priv = (void *)(intptr_t)buf;
           current_buf = buf;
 
           return VO_TRUE;
@@ -1311,7 +1306,7 @@ static uint32_t
 draw_image( mp_image_t *mpi )
 {
      if (mpi->flags & MP_IMGFLAG_DIRECT) {
-          current_buf = (int) mpi->priv;
+          current_buf = (intptr_t)mpi->priv;
           return VO_TRUE;
      }
      if (mpi->flags & MP_IMGFLAG_DRAW_CALLBACK)
@@ -1413,10 +1408,6 @@ static int
 control( uint32_t request, void *data )
 {
      switch (request) {
-     case VOCTRL_GUISUPPORT:
-     case VOCTRL_GUI_NOWINDOW:
-          return VO_TRUE;
-
      case VOCTRL_QUERY_FORMAT:
           return query_format( *((uint32_t *) data) );
 

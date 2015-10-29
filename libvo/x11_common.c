@@ -220,7 +220,7 @@ static int x11_errorhandler(Display * display, XErrorEvent * event)
 
     XGetErrorText(display, event->error_code, (char *) &msg, MSGLEN);
 
-    mp_msg(MSGT_VO, MSGL_ERR, "X11 error: %s\n", msg);
+    mp_msg(MSGT_VO, MSGL_ERR, MSGTR_X11Error, msg);
 
     mp_msg(MSGT_VO, MSGL_V,
            "Type: %x, display: %p, resourceid: %lx, serial: %lx\n",
@@ -431,7 +431,7 @@ int vo_init(void)
 
     // Required so that XLookupString returns UTF-8
     if (!setlocale(LC_CTYPE, "C.UTF-8") && !setlocale(LC_CTYPE, "en_US.utf8"))
-        mp_msg(MSGT_VO, MSGL_WARN, "Could not find a UTF-8 locale, some keys will not be handled.\n");
+        mp_msg(MSGT_VO, MSGL_WARN, MSGTR_CouldntFindUTF8Locale);
     XSetErrorHandler(x11_errorhandler);
 
     dispName = XDisplayName(mDisplayName);
@@ -442,7 +442,7 @@ int vo_init(void)
     if (!mDisplay)
     {
         mp_msg(MSGT_VO, MSGL_ERR,
-               "vo: couldn't open the X11 display (%s)!\n", dispName);
+               MSGTR_CouldntOpenDisplay, dispName);
         return 0;
     }
     mScreen = DefaultScreen(mDisplay);  // screen ID
@@ -826,6 +826,19 @@ err:
     return 0;
 }
 
+static void fixup_ctrl_state(int *ctrl_state, int state)
+{
+    // Attempt to fix if somehow our state got out of
+    // sync with reality.
+    // This usually happens when a shortcut involving CTRL
+    // was used to switch to a different window/workspace.
+    if (*ctrl_state != !!(state & 4)) {
+        *ctrl_state = !!(state & 4);
+        mplayer_put_key(KEY_CTRL |
+            (*ctrl_state ? MP_KEY_DOWN : 0));
+    }
+}
+
 static int handle_x11_event(Display *mydisplay, XEvent *event)
 {
     int key = 0;
@@ -872,15 +885,7 @@ static int handle_x11_event(Display *mydisplay, XEvent *event)
                     } else if (event->type == KeyRelease) {
                         break;
                     }
-                    // Attempt to fix if somehow our state got out of
-                    // sync with reality.
-                    // This usually happens when a shortcut involving CTRL
-                    // was used to switch to a different window/workspace.
-                    if (ctrl_state != !!(event->xkey.state & 4)) {
-                        ctrl_state = !!(event->xkey.state & 4);
-                        mplayer_put_key(KEY_CTRL |
-                            (ctrl_state ? MP_KEY_DOWN : 0));
-                    }
+                    fixup_ctrl_state(&ctrl_state, event->xkey.state);
                     if (!vo_x11_putkey_ext(keySym)) {
                         if (utf8) mplayer_put_key(utf8);
                         else vo_x11_putkey(key);
@@ -894,7 +899,9 @@ static int handle_x11_event(Display *mydisplay, XEvent *event)
                 return VO_EVENT_MOUSE;
             case ButtonPress:
                 key = MP_KEY_DOWN;
+                /* Fallthrough, treat like release otherwise */
             case ButtonRelease:
+                fixup_ctrl_state(&ctrl_state, event->xbutton.state);
 #ifdef CONFIG_GUI
                 // Ignore mouse button 1-3 under GUI.
                 if (use_gui && (event->xbutton.button >= 1)
@@ -923,7 +930,7 @@ static int handle_x11_event(Display *mydisplay, XEvent *event)
                 }
                 break;
             case DestroyNotify:
-                mp_msg(MSGT_VO, MSGL_WARN, "Our window was destroyed, exiting\n");
+                mp_msg(MSGT_VO, MSGL_WARN, MSGTR_WindowDestroyed);
                 mplayer_put_key(KEY_CLOSE_WIN);
                 break;
 	    case ClientMessage:
@@ -960,6 +967,19 @@ int vo_x11_check_events(Display * mydisplay)
         mouse_timer = GetTimerMS();
     }
     return ret;
+}
+
+static void vo_x11_update_fs_borders(void)
+{
+    if (!vo_fs)
+        return;
+    if (vo_dwidth  <= vo_fs_border_l + vo_fs_border_r ||
+        vo_dheight <= vo_fs_border_t + vo_fs_border_b) {
+        mp_msg(MSGT_VO, MSGL_ERR, "[x11] borders too wide, ignored.\n");
+        return;
+    }
+    vo_dwidth  -= vo_fs_border_l + vo_fs_border_r;
+    vo_dheight -= vo_fs_border_t + vo_fs_border_b;
 }
 
 /**
@@ -1144,6 +1164,7 @@ void vo_x11_create_vo_window(XVisualInfo *vis, int x, int y,
     vo_fs = 0;
     vo_dwidth = width;
     vo_dheight = height;
+    vo_x11_update_fs_borders();
     vo_window = vo_x11_create_smooth_window(mDisplay, mRootWin, vis->visual,
                       x, y, width, height, vis->depth, col_map);
     window_state = VOFLAG_HIDDEN;
@@ -1188,6 +1209,7 @@ void vo_x11_create_vo_window(XVisualInfo *vis, int x, int y,
     // set the size values right.
     vo_dwidth  = vo_screenwidth;
     vo_dheight = vo_screenheight;
+    vo_x11_update_fs_borders();
   }
 final:
   if (vo_gc != None)
@@ -1380,7 +1402,11 @@ int vo_x11_update_geometry(void) {
     Window dummy_win;
     XGetGeometry(mDisplay, vo_window, &dummy_win, &dummy_int, &dummy_int,
                  &w, &h, &dummy_int, &depth);
-    if (w <= INT_MAX && h <= INT_MAX) { vo_dwidth = w; vo_dheight = h; }
+    if (w <= INT_MAX && h <= INT_MAX) {
+        vo_dwidth = w;
+        vo_dheight = h;
+        vo_x11_update_fs_borders();
+    }
     XTranslateCoordinates(mDisplay, vo_window, mRootWin, 0, 0, &vo_dx, &vo_dy,
                           &dummy_win);
 
@@ -1529,7 +1555,7 @@ void saver_on(Display * mDisplay)
         {
             if (!DPMSEnable(mDisplay))
             {                   // restoring power saving settings
-                mp_msg(MSGT_VO, MSGL_WARN, "DPMS not available?\n");
+                mp_msg(MSGT_VO, MSGL_WARN, MSGTR_DPMSnotAvailable);
             } else
             {
                 // DPMS does not seem to be enabled unless we call DPMSInfo
@@ -1544,7 +1570,7 @@ void saver_on(Display * mDisplay)
                            "Successfully enabled DPMS\n");
                 } else
                 {
-                    mp_msg(MSGT_VO, MSGL_WARN, "Could not enable DPMS\n");
+                    mp_msg(MSGT_VO, MSGL_WARN, MSGTR_DPMSnotEnabled);
                 }
             }
         }
@@ -1591,9 +1617,9 @@ static int x11_selectinput_errorhandler(Display * display,
     {
         selectinput_err = 1;
         mp_msg(MSGT_VO, MSGL_ERR,
-               "X11 error: BadAccess during XSelectInput Call\n");
+               MSGTR_BadAccessXSelectInput);
         mp_msg(MSGT_VO, MSGL_ERR,
-               "X11 error: The 'ButtonPressMask' mask of specified window was probably already used by another application (see man XSelectInput)\n");
+               MSGTR_ButtonPressMaskInUse);
         /* If you think MPlayer should shutdown with this error,
          * comment out the following line */
         return 0;
@@ -1625,7 +1651,7 @@ void vo_x11_selectinput_witherr(Display * display, Window w,
     if (selectinput_err)
     {
         mp_msg(MSGT_VO, MSGL_ERR,
-               "X11 error: MPlayer discards mouse control (reconfiguring)\n");
+               MSGTR_DiscardMouseControl);
         XSelectInput(display, w,
                      event_mask &
                      (~
@@ -1651,7 +1677,7 @@ void vo_vm_switch(void)
         have_vm = 1;
     } else {
         mp_msg(MSGT_VO, MSGL_WARN,
-               "XF86VidMode extension not available.\n");
+               MSGTR_NoXF86VidModeExtension);
     }
 
     if (have_vm)
@@ -1707,7 +1733,7 @@ void vo_vm_close(void)
                 && (vidmodes[i]->vdisplay == vo_screenheight))
             {
                 mp_msg(MSGT_VO, MSGL_INFO,
-                       "Returning to original mode %dx%d\n",
+                       MSGTR_ReturningOriginalMode,
                        vo_screenwidth, vo_screenheight);
                 break;
             }
@@ -2249,7 +2275,7 @@ int vo_xv_init_colorkey(void)
         if ( rez != Success )
         {
           mp_msg( MSGT_VO, MSGL_FATAL,
-                  "[xv common] Couldn't set colorkey!\n" );
+                  MSGTR_CouldntSetColorkey );
           return 0; // error setting colorkey
         }
       }
@@ -2266,8 +2292,7 @@ int vo_xv_init_colorkey(void)
       else
       {
         mp_msg( MSGT_VO, MSGL_FATAL,
-                "[xv common] Couldn't get colorkey!"
-                "Maybe the selected Xv port has no overlay.\n" );
+                MSGTR_CouldntGetColorkey );
         return 0; // error getting colorkey
       }
     }

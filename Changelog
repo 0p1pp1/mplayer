@@ -1,7 +1,11 @@
 MPlayer
 
+  1.2: "FrameCounter" October 3, 2015
+
     Decoders:
     * Hardware accelerated decoding on OS X via VDA.
+    * Internal libmpeg2 disabled by default, on the assumption
+      that nobody really needs it anymore.
 
     Other:
     * "run" slave/keybinding command now supports expanding properties
@@ -19,6 +23,14 @@ MPlayer
     * Support teletext and CC subtitles in WTV.
     * Support binding keys corresponding to non-ASCII characters.
     * Limited -endpos support for -dump*
+    * Danish messages header file renamed from help_mp-dk.h to help_mp-da.h
+      in order to comply with ISO 639 language code (configure language
+      options will now require da instead of dk)
+    * configure: options --enable-gtk1, --with-glib-config= and
+      --with-gtk-config= removed
+    * Change ID3 genre name for genre ID 67 from "Psychadelic"
+      to "Psychedelic"
+    * support for audio bin/cue images
 
     Ports:
     * Windows: support file names as UTF-8 in slave mode and passing
@@ -30,7 +42,40 @@ MPlayer
     * Android: -wid is supported. This should allow using MPlayer in slave
       mode, a native window pointer needs to be passed as -wid. Untested.
 
-  1.1: "We gave up on 1.0"
+    GUI:
+    * Support for TV/DVB
+    * Various improvements of the context menu and the preferences dialog
+    * Revision of the user interface texts
+    * Console message with information on deprecated (but still supported)
+      entries in the skin configuration file
+    * New symbol character (r) and new dynamic label variables ($D, $U, $P)
+    * New items (pimage, rpotmeter)
+    * Updated skins (avifile, Blue, Blue-small, Clearlooks, Corelian,
+      disappearer, mentalic, mplayer_red, nativeRed, neutron, phony, plastic,
+      slim, softgrip, standard, trium, tvisor, xanim)
+    * Video can be rotated
+    * New GUI message: evSetRotation
+    * GUI now officially needs GTK+ and GLib versions 2 (it hadn't compiled
+      with versions 1 for quite some time)
+    * Support for audio and video bin/cue image playback
+    * Support for Audio CD / (Super) Video CD / DVD image and DVD copy playback
+      through the respective scheme (cd://, vcd://, dvd://)
+    * Support for arbitrary non-binary data file cue sheets (i.e. cue sheets
+      describing playlists for data files containing multiple titles)
+
+    FFmpeg:
+    * Version 2.8 with local patches
+
+  1.1.1: May 5, 2013
+
+    Security:
+    * disable unsafe playlist parsing
+    * security fixes in asx parser
+    Other:
+    * FFmpeg updated to 0.11
+
+
+  1.1: "We gave up on 1.0" June 10, 2012
 
     Decoders:
     * FFmpeg AAC decoder is now preferred over libfaad2 and the internal
@@ -66,9 +111,10 @@ MPlayer
     MEncoder:
     * -force-key-frames option to set explicit seek points.
 
+
 MPlayer (1.0)
 
-  rc4: "Yes We Can"
+  rc4: "Yes We Can" January 30, 2011
 
     GUI: Changes towards removing the GUI
     * The GUI will no longer display any error or warning messages.

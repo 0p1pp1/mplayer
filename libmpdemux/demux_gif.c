@@ -49,7 +49,10 @@ typedef struct {
 #define DGifOpen(a, b) DGifOpen(a, b, NULL)
 #define DGifOpenFileHandle(a) DGifOpenFileHandle(a, NULL)
 #define GifError() (gif ? gif->Error : 0)
-#define GifErrorString() GifErrorString(gif->Error)
+#define GifErrorString() GifErrorString(err)
+#if defined GIFLIB_MINOR && GIFLIB_MINOR >= 1
+#define DGifCloseFile(a) DGifCloseFile(a, NULL)
+#endif
 #endif
 
 /* >= 4.2 prior GIFLIB did not have MAJOR/MINOR defines */
@@ -297,12 +300,8 @@ static demuxer_t* demux_open_gif(demuxer_t* demuxer)
 
   // make sure the demuxer knows about the new video stream header
   // (even though new_sh_video() ought to take care of it)
+  demuxer->video->id = 0;
   demuxer->video->sh = sh_video;
-
-  // make sure that the video demuxer stream header knows about its
-  // parent video demuxer stream (this is getting wacky), or else
-  // video_read_properties() will choke
-  sh_video->ds = demuxer->video;
 
   sh_video->format = mmioFOURCC(8, 'R', 'G', 'B');
 
@@ -329,7 +328,7 @@ static void demux_close_gif(demuxer_t* demuxer)
   gif_priv_t *priv = demuxer->priv;
   if (!priv) return;
   if (priv->gif && DGifCloseFile(priv->gif) == GIF_ERROR)
-    print_gif_error(priv->gif);
+    print_gif_error(NULL);
   free(priv->refimg);
   free(priv);
 }

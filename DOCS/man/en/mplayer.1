@@ -1,5 +1,5 @@
 .\" $Revision$
-.\" MPlayer (C) 2000-2013 MPlayer Team
+.\" MPlayer (C) 2000-2015 MPlayer Team
 .\" This man page was/is done by Gabucino, Diego Biurrun, Jonas Jermann
 .
 .\" --------------------------------------------------------------------------
@@ -31,7 +31,7 @@
 .\" Title
 .\" --------------------------------------------------------------------------
 .
-.TH MPlayer 1 "2012-03-03" "The MPlayer Project" "The Movie Player"
+.TH MPlayer 1 "2015-02-13" "The MPlayer Project" "The Movie Player"
 .
 .SH NAME
 mplayer  \- movie player
@@ -603,6 +603,7 @@ equ_channel_1 ... equ_channel_6
 gui_main_pos_x,
 gui_main_pos_y,
 gui_save_pos (yes/no),
+gui_tv_digital (yes/no),
 gui_video_out_pos_x,
 gui_video_out_pos_y,
 load_fullscreen  (yes/no),
@@ -637,7 +638,7 @@ font_autoscale
 font_blur
 .RB ( subfont-blur ") (FreeType only),"
 font_encoding
-.RB ( subfont-encoding ") (FreeType only),"
+.RB ( subfont-encoding ),
 font_factor
 .RB ( ffactor ),
 font_name
@@ -650,6 +651,8 @@ font_text_scale
 .RB ( subfont-text-scale ") (FreeType only),"
 gui_skin
 .RB ( skin ),
+idle
+.RB ( idle ),
 osd_level
 .RB ( osdlevel ),
 softvol
@@ -666,6 +669,8 @@ sub_pos
 .RB ( subpos ),
 sub_unicode
 .RB ( unicode ),
+sub_utf8
+.RB ( utf8 ),
 v_flip
 .RB ( flip ),
 v_framedrop
@@ -1289,8 +1294,8 @@ maliciously constructed files.
 Such files may trigger harmful actions.
 This has been the case for all MPlayer versions, but unfortunately this
 fact was not well documented earlier, and some people have even misguidedly
-recommended use of -playlist with untrusted sources.
-Do NOT use -playlist with random internet sources or files you don't trust!
+recommended use of \-playlist with untrusted sources.
+Do NOT use \-playlist with random internet sources or files you don't trust!
 .br
 .I NOTE:
 This option is considered an entry so options found after it will apply
@@ -1846,9 +1851,12 @@ input file type (available: jpeg, png, tga, sgi)
 .PD 1
 .
 .TP
-.B \-ni (AVI only)
-Force usage of non-interleaved AVI parser (fixes playback
+.B \-ni
+Force treating files as non-interleaved.
+In particular forces usage of non-interleaved AVI parser (fixes playback
 of some bad AVI files).
+Can also help playing files that otherwise play audio
+and video alternating instead of at the same time.
 .
 .TP
 .B \-nobps (AVI only)
@@ -2060,9 +2068,9 @@ frame size in Bytes
 .RE
 .PD 0
 .RSs
-.IPs "mplayer foreman.qcif -demuxer rawvideo -rawvideo qcif"
+.IPs "mplayer foreman.qcif \-demuxer rawvideo \-rawvideo qcif"
 Play the famous "foreman" sample video.
-.IPs "mplayer sample-720x576.yuv -demuxer rawvideo -rawvideo w=720:h=576"
+.IPs "mplayer sample-720x576.yuv \-demuxer rawvideo \-rawvideo w=720:h=576"
 Play a raw YUV sample.
 .RE
 .PD 1
@@ -2185,7 +2193,7 @@ Specify TV device (default: /dev/\:video0).
 .I NOTE:
 For the bsdbt848 driver you can provide both bktr and tuner device
 names separating them with a comma, tuner after
-bktr (e.g.\& -tv device=/dev/bktr1,/dev/tuner1).
+bktr (e.g.\& \-tv device=/dev/bktr1,/dev/tuner1).
 .IPs input=<value>
 Specify input (default: 0 (TV), see console output for available inputs).
 .IPs freq=<value>
@@ -2353,7 +2361,7 @@ choppy video when using immediatemode=0.
 .TP
 .B \-tvscan <option1:option2:...> (TV and MPlayer only)
 Tune the TV channel scanner.
-MPlayer will also print value for "-tv channels=" option,
+MPlayer will also print value for "\-tv channels=" option,
 including existing and just found channels.
 .sp 1
 Available suboptions are:
@@ -2565,12 +2573,12 @@ instead of at the end.
 .
 .TP
 .B \-font <path to font.desc file, path to font (FreeType), font pattern (Fontconfig)>
-Search for the OSD/\:SUB fonts in an alternative directory (default for normal
+Search for the OSD/\:subtitle fonts in an alternative directory (default for normal
 fonts: ~/\:.mplayer/\:font/\:font.desc, default for FreeType fonts:
-~/.mplayer/\:subfont.ttf).
+~/.mplayer/\:subfont.ttf, default for Fontconfig: "sans-serif").
 .br
 .I NOTE:
-With FreeType, this option determines the path to the text font file.
+With FreeType, this option determines the path to the font file.
 With Fontconfig, this option determines the Fontconfig font pattern.
 .sp 1
 .I EXAMPLE:
@@ -2588,12 +2596,13 @@ With Fontconfig, this option determines the Fontconfig font pattern.
 .
 .TP
 .B \-fontconfig (fontconfig only)
-Enables the usage of fontconfig managed fonts.
+Enables the usage of fontconfig managed fonts (default: autodetect).
 .br
 .I NOTE:
 By default fontconfig is used for libass-rendered subtitles and not used for
 OSD. With \-fontconfig it is used for both libass and OSD, with \-nofontconfig
-it is not used at all.
+it is not used at all, i.e. only then \-font and \-subfont will work with a
+given path to font.
 .
 .TP
 .B \-forcedsubsonly
@@ -2810,7 +2819,8 @@ CC subtitles have not been spotted on DVDs from other regions so far.
 .TP
 .B \-subcp <codepage> (iconv only)
 If your system supports iconv(3), you can use this option to
-specify the subtitle codepage.
+specify the subtitle codepage. It takes priority over both \-utf8 and
+\-unicode.
 .sp 1
 .I EXAMPLE:
 .PD 0
@@ -2903,10 +2913,13 @@ proportional to movie diagonal (default)
 Sets the font blur radius (default: 2).
 .
 .TP
-.B \-subfont\-encoding <value> (FreeType only)
+.B \-subfont\-encoding <value>
 Sets the font encoding.
 When set to 'unicode', all the glyphs from the font file will be rendered and
-unicode will be used (default: unicode).
+unicode will be used (default: unicode). (Without FreeType, setting any other
+value than 'unicode' will disable unicode glyphs rendering for font.desc
+files. With FreeType and for other values than 'unicode' your system has to
+support iconv(3) in order for this to work.)
 .
 .TP
 .B \-subfont\-osd\-scale <0\-100> (FreeType only)
@@ -2955,7 +2968,8 @@ used for the OSD and clear it (default: ^[[A\\r^[[K).
 .
 .TP
 .B \-unicode
-Tells MPlayer to handle the subtitle file as unicode.
+Tells MPlayer to handle the subtitle file as unicode. (It will only take
+effect if neither \-subcp nor \-utf8 is given.)
 .
 .TP
 .B \-unrarexec <path to unrar executable> (not supported on MingW)
@@ -2965,7 +2979,8 @@ The path must include the executable's filename, i.e.\& /usr/local/bin/unrar.
 .
 .TP
 .B "\-utf8 \ \ "
-Tells MPlayer to handle the subtitle file as UTF-8.
+Tells MPlayer to handle the subtitle file as UTF-8. (It will only take effect
+if \-subcp isn't given, and it takes priority over \-unicode.)
 .
 .TP
 .B \-vobsub <VOBsub file without extension>
@@ -3036,7 +3051,7 @@ Set the step size of mixer volume changes in percent of the whole range
 .B \-volume <-1\-100> (also see \-af volume)
 Set the startup volume in the mixer, either hardware or software (if
 used with \-softvol).
-A value of -1 (the default) will not change the volume.
+A value of \-1 (the default) will not change the volume.
 .
 .
 .
@@ -3504,26 +3519,38 @@ Fixes fullscreen switching on OpenBox 1.x.
 .PD 1
 .
 .TP
+.B \-fs-border-left   <pixels>
+.TP
+.B \-fs-border-right  <pixels>
+.TP
+.B \-fs-border-top    <pixels>
+.TP
+.B \-fs-border-bottom <pixels>
+Specify extra borders in full screen mode.
+The borders apply to all displayed elements: video, OSD and EOSD.
+The number of pixels is specified in terms of screen resolution.
+Currently only supported with by the gl video output driver.
+.TP
 .B \-gamma <\-100\-100>
 Adjust the gamma of the video signal (default: 0).
 Not supported by all video output drivers.
 .
 .TP
-.B \-geometry x[%][:y[%]] or [WxH][+-x+-y]
+.B \-geometry x[%][:y[%]] or [WxH][+\-x+\-y]
 Adjust where the output is on the screen initially.
 The x and y specifications are in pixels measured from the top-left of the
 screen to the top-left of the image being displayed, however if a percentage
 sign is given after the argument it turns the value into a percentage of the
 screen size in that direction.
 It also supports the standard X11 \-geometry option format, in which e.g.
-+10-50 means "place 10 pixels from the left border and 50 pixels from the lower
-border" and "--20+-10" means "place 20 pixels beyond the right and 10 pixels
++10\-50 means "place 10 pixels from the left border and 50 pixels from the lower
+border" and "\-\-20+\-10" means "place 20 pixels beyond the right and 10 pixels
 beyond the top border".
 If an external window is specified using the \-wid option, then the x and
 y coordinates are relative to the top-left corner of the window rather
 than the screen.
-The coordinates are relative to the screen given with \-xineramascreen for
-the video output drivers that fully support \-xineramascreen (direct3d, gl, gl_tiled,
+The coordinates are relative to the screen given with \-screen for
+the video output drivers that fully support \-screen (direct3d, gl, gl_tiled,
 vdpau, x11, xv, xvmc, corevideo).
 .br
 .I NOTE:
@@ -3656,7 +3683,7 @@ As \-border\-pos\-x but for top/bottom borders.
 Rotate display by 90, 180 or 270 degrees.
 Rotates also the OSD, not just the video image itself.
 Currently only supported by the gl video output driver.
-For all other video outputs -vf ass,expand=osd=1,rotate=n can be used, in the future this might even happen automatically.
+For all other video outputs \-vf ass,expand=osd=1,rotate=n can be used, in the future this might even happen automatically.
 .
 .TP
 .B \-refreshrate <Hz>
@@ -3723,7 +3750,7 @@ panscan, etc are no longer handled by MPlayer but must be managed by the
 application that created the window.
 .
 .TP
-.B \-xineramascreen <\-2\-...>
+.B \-screen <\-2\-...> (alias for \-xineramascreen)
 In Xinerama configurations (i.e.\& a single desktop that spans across multiple
 displays) this option tells MPlayer which screen to display the movie on.
 A value of \-2 means fullscreen across the whole virtual display (in this case
@@ -4177,7 +4204,7 @@ Mac OS X CoreVideo video output driver
 .PD 0
 .RSs
 .IPs device_id=<number>
-DEPRECATED, use \-xineramascreen instead.
+DEPRECATED, use \-screen instead.
 Choose the display device to use for fullscreen or set it to \-1 to
 always use the same screen the video window is on (default: \-1 \- auto).
 .IPs shared_buffer
@@ -4276,9 +4303,9 @@ Use glxinfo or a similar tool to display the supported OpenGL extensions.
 .PD 0
 .RSs
 .IPs backend=<n>
-Select the backend/OpenGL implementation to use (default: -1).
+Select the backend/OpenGL implementation to use (default: \-1).
 .RSss
--1: Autoselect
+\-1: Autoselect
 .br
 0: Win32/WGL
 .br
@@ -4421,6 +4448,8 @@ Might be faster on some cards.
 Use experimental unsharp masking with 3x3 support and a default strength of 0.5 (see filter-strength).
 .IPs 5
 Use experimental unsharp masking with 5x5 support and a default strength of 0.5 (see filter-strength).
+.IPs 64
+Use nearest-neighbor scaling.
 .RE
 .IPs cscale=<n>
 Select the scaling function to use for chrominance scaling.
@@ -4846,7 +4875,7 @@ The format is the same as the one employed by mjpegtools, so this is
 useful if you want to process the video with the mjpegtools suite.
 It supports the YV12 format.
 If your source file has a different format and is interlaced, make sure
-to use -vf scale=::1 to ensure the conversion uses interlaced mode.
+to use \-vf scale=::1 to ensure the conversion uses interlaced mode.
 You can combine it with the \-fixed\-vo option to concatenate files
 with the same dimensions and fps value.
 .PD 0
@@ -6209,7 +6238,7 @@ Scales this amount in addition to speed.
 (default: 1.0)
 .IPs stride=<amount>
 Length in milliseconds to output each stride.
-Too high of value will cause noticable skips at high scale amounts and
+Too high of value will cause noticeable skips at high scale amounts and
 an echo at low scale amounts.
 Very low values will alter pitch.
 Increasing improves performance.
@@ -6269,15 +6298,15 @@ Collects and prints statistics about the audio stream, especially the volume.
 These statistics are especially intended to help adjusting the volume while
 avoiding clipping.
 The volumes are printed in dB and compatible with the volume audio filter,
-they are always rounded towards -0dB.
+they are always rounded towards \-0dB.
 .sp 1
 The 'n_samples' field is the total number of samples seen by the filter.
 The 'mean_volume' field is the root mean square.
 The 'max_volume' field is exactly what it says.
-The 'histogram_Xdb' fields count how many samples were at -XdB, for X just
+The 'histogram_Xdb' fields count how many samples were at \-XdB, for X just
 below max_volume.
 .sp 1
-For example, if max_volume is -7dB and histogram_7dB is 19, 'volume=7' will
+For example, if max_volume is \-7dB and histogram_7dB is 19, 'volume=7' will
 not cause clipping and 'volume=8' will cause clipping on exactly 19 samples.
 .
 .
@@ -7206,7 +7235,7 @@ filters.
 .I EXAMPLE:
 .br
 overlay="movie=$small_video, scale=160:120 [ca]; [in] [ca] overlay=16:8"
-mplayer -vf lavfi='$overlay' $big_video
+mplayer \-vf lavfi='$overlay' $big_video
 .
 .TP
 .B kerndeint[=thresh[:map[:order[:sharp[:twoway]]]]]
@@ -8006,13 +8035,16 @@ decimation (ugly).
 .RE
 .
 .TP
-.B screenshot
+.B screenshot=prefix
 Allows acquiring screenshots of the movie using slave mode
 commands that can be bound to keypresses.
 See the slave mode documentation and the INTERACTIVE CONTROL
 section for details.
-Files named 'shotNNNN.png' will be saved in the working directory,
+By default files named 'shotNNNN.png' will be saved in the working directory,
 using the first available number \- no files will be overwritten.
+Specify a prefix to change the name or location, e.g.
+\-vf screenshot=shots/now will save the files in the directory
+shots with nowNNNN.png as name.
 The filter has no overhead when not used and accepts an arbitrary
 colorspace, so it is safe to add it to the configuration file.
 Make sure that the screenshot filter is added after all other filters
@@ -8163,7 +8195,7 @@ To use either of the interleaved-rows output formats to display
 full-screen on a row-interleaved 3D display, you will need to scale the
 video to the correct height first using the "scale" filter, if it is not
 already the right height.  Typically, that is 1080 rows (so use e.g.
-"-vf scale=1440:1080,stereo3d=sbsl:irl" for a 720p side-by-side encoded
+"\-vf scale=1440:1080,stereo3d=sbsl:irl" for a 720p side-by-side encoded
 movie).
 .RE
 .PD 1
@@ -8227,7 +8259,7 @@ Dropping it may be necessary to avoid confusing encoders.
 .sp 1
 .RS
 .I NOTE:
-Using this filter together with any sort of seeking (including -ss and EDLs)
+Using this filter together with any sort of seeking (including \-ss and EDLs)
 may make demons fly out of your nose.
 .RE
 .
@@ -12473,7 +12505,7 @@ explains how to create useful bug reports.
 MPlayer was initially written by Arpad Gereoffy.
 See the AUTHORS file for a list of some of the many other contributors.
 .PP
-MPlayer is (C) 2000\-2013 The MPlayer Team
+MPlayer is (C) 2000\-2015 The MPlayer Team
 .PP
 This man page was written mainly by Gabucino, Jonas Jermann and Diego Biurrun.
 It is maintained by Diego Biurrun.

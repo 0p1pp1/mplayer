@@ -99,7 +99,8 @@ void (GLAPIENTRY *mpglColorMask)(GLboolean, GLboolean, GLboolean, GLboolean);
 void (GLAPIENTRY *mpglGenBuffers)(GLsizei, GLuint *);
 void (GLAPIENTRY *mpglDeleteBuffers)(GLsizei, const GLuint *);
 void (GLAPIENTRY *mpglBindBuffer)(GLenum, GLuint);
-GLvoid* (GLAPIENTRY *mpglMapBuffer)(GLenum, GLenum);
+static GLvoid* (GLAPIENTRY *mpglMapBuffer)(GLenum, GLenum);
+GLvoid* (GLAPIENTRY *mpglMapBufferRange)(GLenum, ptrdiff_t, ptrdiff_t, unsigned);
 GLboolean (GLAPIENTRY *mpglUnmapBuffer)(GLenum);
 void (GLAPIENTRY *mpglBufferData)(GLenum, intptr_t, const GLvoid *, GLenum);
 void (GLAPIENTRY *mpglCombinerParameterfv)(GLenum, const GLfloat *);
@@ -396,6 +397,10 @@ int glFindFormat(uint32_t fmt, int *bpp, GLint *gl_texfmt,
       *gl_format = GL_BGRA;
       *gl_type = GL_UNSIGNED_BYTE;
       break;
+    case IMGFMT_BGR48NE:
+      *gl_format = GL_BGR;
+      *gl_type = GL_UNSIGNED_SHORT;
+      break;
     default:
       *gl_texfmt = GL_RGBA;
       *gl_format = GL_RGBA;
@@ -493,6 +498,7 @@ static const extfunc_desc_t extfuncs[] = {
   {&mpglDeleteBuffers, NULL, {"glDeleteBuffers", "glDeleteBuffersARB", NULL}},
   {&mpglBindBuffer, NULL, {"glBindBuffer", "glBindBufferARB", NULL}},
   {&mpglMapBuffer, NULL, {"glMapBuffer", "glMapBufferARB", NULL}},
+  {&mpglMapBufferRange, "ARB_map_buffer_range", {"glMapBufferRange", "glMapBufferRangeARB", NULL}},
   {&mpglUnmapBuffer, NULL, {"glUnmapBuffer", "glUnmapBufferARB", NULL}},
   {&mpglBufferData, NULL, {"glBufferData", "glBufferDataARB", NULL}},
   {&mpglCombinerParameterfv, "NV_register_combiners", {"glCombinerParameterfv", "glCombinerParameterfvNV", NULL}},
@@ -558,6 +564,17 @@ static const extfunc_desc_t extfuncs[] = {
   {NULL}
 };
 
+static GLvoid *wrap_glMapBuffer(GLenum target, ptrdiff_t offset, ptrdiff_t range, unsigned flags) {
+  GLenum access = GL_READ_WRITE;
+  if (offset != 0 || range == 0 || !(flags & (GL_MAP_WRITE_BIT | GL_MAP_READ_BIT)))
+    return NULL;
+  if (!(flags & GL_MAP_WRITE_BIT))
+    access = GL_READ_ONLY;
+  else if (!(flags & GL_MAP_READ_BIT))
+    access = GL_WRITE_ONLY;
+  return mpglMapBuffer(target, access);
+}
+
 /**
  * \brief find the function pointers of some useful OpenGL extensions
  * \param getProcAddress function to resolve function names, may be NULL
@@ -609,6 +626,10 @@ static void getFunctions(void *(*getProcAddress)(const GLubyte *),
                   !!strstr(allexts, "GL_ARB_shadow") ||
                   !!strstr(allexts, "GL_OES_depth_texture");
   free(allexts);
+
+  // replacement functions
+  if (!mpglMapBufferRange && mpglMapBuffer)
+    mpglMapBufferRange = wrap_glMapBuffer;
 }
 
 /**
@@ -2434,6 +2455,7 @@ static void *eglgpa(const GLubyte *name) {
       "/usr/lib/libGLESv2.so",
       "/usr/lib/x86_64-linux-gnu/libGLESv2.so",
       "/usr/lib/i386-linux-gnu/libGLESv2.so",
+      "/usr/lib/arm-linux-gnueabihf/libGLESv2.so",
       NULL};
     int i;
     void *h = NULL;

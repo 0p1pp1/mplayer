@@ -23,8 +23,13 @@
 #include "mp_taglists.h"
 #include "libavutil/common.h"
 #include "libavformat/avformat.h"
-// for AVCodecTag
-#include "libavformat/internal.h"
+// this is really defined in libavformat/internal.h
+// but requiring that header is a bit messy when building against
+// a system copy of FFmpeg.
+struct AVCodecTag {
+    enum AVCodecID id;
+    unsigned int tag;
+};
 
 static const struct AVCodecTag mp_wav_tags[] = {
     { AV_CODEC_ID_ADPCM_4XM,         MKTAG('4', 'X', 'M', 'A') },
@@ -43,6 +48,9 @@ static const struct AVCodecTag mp_wav_tags[] = {
     { AV_CODEC_ID_ADPCM_IMA_ISS,     MKTAG('A', 'I', 'S', 'S') },
     { AV_CODEC_ID_ADPCM_IMA_WS,      MKTAG('A', 'I', 'W', 'S') },
     { AV_CODEC_ID_ADPCM_THP,         MKTAG('T', 'H', 'P', 'A') },
+#if LIBAVUTIL_VERSION_MICRO >= 100
+    { AV_CODEC_ID_ADPCM_THP_LE,      MKTAG('T', 'H', 'P', 'L') },
+#endif
     { AV_CODEC_ID_ADPCM_XA,          MKTAG('P', 'S', 'X', 'A') },
     { AV_CODEC_ID_AMR_NB,            MKTAG('n', 'b',   0,   0) },
     { AV_CODEC_ID_ATRAC1,            MKTAG('A', 'T', 'R', '1') },
@@ -79,7 +87,7 @@ static const struct AVCodecTag mp_wav_tags[] = {
     { AV_CODEC_ID_TTA,               MKTAG('T', 'T', 'A', '1') },
     { AV_CODEC_ID_TWINVQ,            MKTAG('T', 'W', 'I', '2') },
 #if LIBAVUTIL_VERSION_MICRO >= 100
-    { AV_CODEC_ID_VIMA,              MKTAG('V', 'I', 'M', 'A') },
+    { AV_CODEC_ID_ADPCM_VIMA,        MKTAG('V', 'I', 'M', 'A') },
 #endif
     { AV_CODEC_ID_VMDAUDIO,          MKTAG('V', 'M', 'D', 'A') },
     { AV_CODEC_ID_WAVPACK,           MKTAG('W', 'V', 'P', 'K') },
@@ -98,6 +106,9 @@ static const struct AVCodecTag mp_codecid_override_tags[] = {
     { AV_CODEC_ID_ADPCM_G722,        0x28f },
     { AV_CODEC_ID_ADPCM_IMA_EA_SEAD, MKTAG('S', 'E', 'A', 'D') },
     { AV_CODEC_ID_ADPCM_IMA_AMV,     MKTAG('A', 'M', 'V', 'A') },
+#if LIBAVUTIL_VERSION_MICRO >= 100
+    { AV_CODEC_ID_ATRAC3P,           0xE923AABF},
+#endif
     { AV_CODEC_ID_DTS,               0x2001 },
     { AV_CODEC_ID_DVVIDEO,           MKTAG('d', 'v', 's', 'd') },
     { AV_CODEC_ID_EAC3,              MKTAG('E', 'A', 'C', '3') },
@@ -111,6 +122,7 @@ static const struct AVCodecTag mp_codecid_override_tags[] = {
 #endif
     { AV_CODEC_ID_G729,              MKTAG('G', '7', '2', '9') },
     { AV_CODEC_ID_H264,              MKTAG('H', '2', '6', '4') },
+    { AV_CODEC_ID_HEVC,              MKTAG('H', 'E', 'V', 'C') },
     { AV_CODEC_ID_MP3,               0x55 },
     { AV_CODEC_ID_MPEG4,             MKTAG('M', 'P', '4', 'V') },
 #if LIBAVUTIL_VERSION_MICRO >= 100

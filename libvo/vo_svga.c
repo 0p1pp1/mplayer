@@ -52,6 +52,8 @@ TODO:
 
 #include "config.h"
 #include "video_out.h"
+#define NO_DRAW_FRAME
+#define NO_DRAW_SLICE
 #include "video_out_internal.h"
 #include "fastmemcpy.h"
 #include "osdep/getch2.h"
@@ -241,7 +243,7 @@ static uint32_t svga_draw_image(mp_image_t *mpi){
 
     if(mpi->flags & MP_IMGFLAG_DIRECT){
         mp_msg(MSGT_VO,MSGL_DBG3, "vo_svga: drawing direct rendered surface\n");
-        cpage=(uint32_t)mpi->priv;
+        cpage=(uintptr_t)mpi->priv;
         assert((cpage>=0)&&(cpage<max_pages));
         return VO_TRUE; //it's already done
     }
@@ -553,17 +555,6 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width,
     return 0;
 }
 
-static int draw_slice(uint8_t *image[],int stride[],
-               int w, int h, int x, int y) {
-    assert(0);
-    return VO_ERROR;//this is yv12 only -> vf_scale should do all transforms
-}
-
-static int draw_frame(uint8_t *src[]) {
-    assert(0);
-    return VO_ERROR;//this one should not be called
-}
-
 static void draw_osd(void)
 {
     mp_msg(MSGT_VO,MSGL_DBG4, "vo_svga: draw_osd()\n");
@@ -712,7 +703,7 @@ static uint32_t get_image(mp_image_t *mpi){
             mpi->stride[0] = mode_stride;
             mpi->planes[0] = PageStore[page].vbase +
                              y_pos*mode_stride + (x_pos*mpi->bpp)/8;
-            mpi->priv=(void *)page;
+            mpi->priv=(void *)(uintptr_t)page;
             mp_msg(MSGT_VO,MSGL_DBG3, "vo_svga: direct render allocated! page=%d\n",page);
             return VO_TRUE;
         }

@@ -84,11 +84,9 @@ typedef struct tagAVS
 
 static AVS_T *initAVS(const char *filename)
 {
-    AVS_T *AVS = malloc (sizeof(AVS_T));
+    AVS_T *AVS = calloc(1, sizeof(AVS_T));
     AVS_Value arg0 = avs_new_value_string(filename);
     AVS_Value args = avs_new_value_array(&arg0, 1);
-
-    memset(AVS, 0, sizeof(AVS_T));
 
 #ifdef WIN32_LOADER
     AVS->ldt_fs = Setup_LDT_Keeper();
@@ -167,7 +165,7 @@ static int demux_avs_fill_buffer(demuxer_t *demuxer, demux_stream_t *ds)
     if (ds == demuxer->video)
     {
         sh_video_t *sh_video = demuxer->video->sh;
-        char *dst;
+        unsigned char *dst;
         int w, h;
         if (AVS->video_info->num_frames <= AVS->frameno) return 0; // EOF
 
@@ -290,7 +288,6 @@ static demuxer_t* demux_open_avs(demuxer_t* demuxer)
         if (demuxer->video->id == -1) demuxer->video->id = 0;
         if (demuxer->video->id == 0)
         demuxer->video->sh = sh_video;
-        sh_video->ds = demuxer->video;
 
         sh_video->disp_w = AVS->video_info->width;
         sh_video->disp_h = AVS->video_info->height;
@@ -331,7 +328,6 @@ static demuxer_t* demux_open_avs(demuxer_t* demuxer)
         if (demuxer->audio->id == -1) demuxer->audio->id = 0;
         if (demuxer->audio->id == 0)
         demuxer->audio->sh = sh_audio;
-        sh_audio->ds = demuxer->audio;
 
         sh_audio->wf = malloc(sizeof(*sh_audio->wf));
         sh_audio->wf->wFormatTag = sh_audio->format =

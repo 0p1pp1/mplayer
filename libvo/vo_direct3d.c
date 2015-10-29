@@ -24,6 +24,7 @@
 #include <d3d9.h>
 #include "config.h"
 #include "video_out.h"
+#define NO_DRAW_FRAME
 #include "video_out_internal.h"
 #include "fastmemcpy.h"
 #include "mp_msg.h"
@@ -781,8 +782,6 @@ static int control(uint32_t request, void *data)
         vo_w32_fullscreen();
         resize_d3d();
         return VO_TRUE;
-    case VOCTRL_RESET:
-        return VO_NOTIMPL;
     case VOCTRL_PAUSE:
         priv->is_paused = 1;
         return VO_TRUE;
@@ -790,11 +789,7 @@ static int control(uint32_t request, void *data)
         priv->is_paused = 0;
         return VO_TRUE;
     case VOCTRL_GUISUPPORT:
-        return VO_NOTIMPL;
-    case VOCTRL_SET_EQUALIZER:
-        return VO_NOTIMPL;
-    case VOCTRL_GET_EQUALIZER:
-        return VO_NOTIMPL;
+        return VO_TRUE;
     case VOCTRL_ONTOP:
         vo_w32_ontop();
         return VO_TRUE;
@@ -811,7 +806,7 @@ static int control(uint32_t request, void *data)
     case VOCTRL_GET_PANSCAN:
         return VO_TRUE;
     }
-    return VO_FALSE;
+    return VO_NOTIMPL;
 }
 
 /** @brief libvo Callback: Configre the Direct3D adapter.
@@ -970,14 +965,6 @@ static int draw_slice(uint8_t *src[], int stride[], int w,int h,int x,int y )
     memcpy_pic(dst, my_src, w, h, uv_stride, stride[2]);
 
     return 0; /* Success */
-}
-
-/** @brief libvo Callback: Unused function
- */
-static int draw_frame(uint8_t *src[])
-{
-    mp_msg(MSGT_VO, MSGL_V, "<vo_direct3d>draw_frame called.\n");
-    return VO_FALSE;
 }
 
 /** @brief Maps MPlayer alpha to D3D

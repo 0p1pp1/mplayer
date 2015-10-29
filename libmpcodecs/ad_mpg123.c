@@ -84,8 +84,7 @@ static int preinit(sh_audio_t *sh)
     if (mpg123_init() != MPG123_OK)
         return 0;
 
-    sh->context = malloc(sizeof(struct ad_mpg123_context));
-    con = sh->context;
+    sh->context = con = calloc(sizeof(*con), 1);
     /* Auto-choice of optimized decoder (first argument NULL). */
     con->handle = mpg123_new(NULL, &err);
     if (!con->handle)
@@ -175,13 +174,13 @@ static int compute_bitrate(struct mpg123_frameinfo *i)
  * also throw in ID3v2 info which libmpg123 collects anyway. */
 static void print_header_compact(struct mpg123_frameinfo *i)
 {
-    static const char *smodes[5] = {
+    static const char * const smodes[5] = {
         "stereo", "joint-stereo", "dual-channel", "mono", "invalid"
     };
-    static const char *layers[4] = {
+    static const char * const layers[4] = {
         "Unknown", "I", "II", "III"
     };
-    static const char *versions[4] = {
+    static const char * const versions[4] = {
         "1.0", "2.0", "2.5", "x.x"
     };
 
@@ -379,7 +378,7 @@ static int decode_a_bit(sh_audio_t *sh, unsigned char *buf, int count)
  * 1 on success, 0 on error */
 static int reopen_stream(sh_audio_t *sh)
 {
-    struct ad_mpg123_context *con = (struct ad_mpg123_context*) sh->context;
+    struct ad_mpg123_context *con = sh->context;
 
     mpg123_close(con->handle);
     /* No resetting of the context:
@@ -443,7 +442,7 @@ static int init(sh_audio_t *sh)
 
 static void uninit(sh_audio_t *sh)
 {
-    struct ad_mpg123_context *con = (struct ad_mpg123_context*) sh->context;
+    struct ad_mpg123_context *con = sh->context;
 
     mpg123_close(con->handle);
     mpg123_delete(con->handle);

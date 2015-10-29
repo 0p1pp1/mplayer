@@ -343,7 +343,7 @@ static int IS_SUB(es_stream_type_t type)
 	return 0;
 }
 
-static int ts_parse(demuxer_t *demuxer, ES_stream_t *es, unsigned char *packet, int probe);
+static int ts_parse(demuxer_t *demuxer, ES_stream_t *es, int probe);
 
 static uint8_t get_packet_size(const unsigned char *buf, int size)
 {
@@ -452,7 +452,6 @@ static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
 		{
 			sh->needs_parsing = 1;
 			sh->format = IS_AUDIO(es->type) ? es->type : es->subtype;
-			sh->ds = demuxer->audio;
 			sh->default_track = (es->component_tag == 0x10);
 			if (es->lang[0])
 				sh->lang = strdup(es->lang);
@@ -480,7 +479,6 @@ static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
 		if(sh)
 		{
 			sh->format = IS_VIDEO(es->type) ? es->type : es->subtype;
-			sh->ds = demuxer->video;
 			sh->default_track = (es->component_tag == 0x00);
 
 			priv->ts.streams[es->pid].id = priv->last_vid;
@@ -759,7 +757,6 @@ typedef struct {
 	char slang[32];
 	uint16_t prog;
 	off_t probe;
-	int scrambled;
 } tsdemux_init_t;
 
 //second stage: returns the count of A52 syncwords found
@@ -801,7 +798,6 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 	int32_t p, chosen_pid = 0;
 	off_t pos=0, ret = 0, init_pos, end_pos;
 	ES_stream_t es;
-	unsigned char tmp[TS_FEC_PACKET_SIZE];
 	ts_priv_t *priv = (ts_priv_t*) demuxer->priv;
 	struct {
 		char *buf;
@@ -834,9 +830,8 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 		if(pos > end_pos || demuxer->stream->eof)
 			break;
 
-		if(ts_parse(demuxer, &es, tmp, 1))
+		if(ts_parse(demuxer, &es, 1))
 		{
-			param->scrambled |= (tmp[3] & 0xC0);
 			//Non PES-aligned A52 audio may escape detection if PMT is not present;
 			//in this case we try to find at least 3 A52 syncwords
 			if((es.type == PES_PRIVATE1) && (! audio_found) && req_apid > -2)
@@ -1225,6 +1220,7 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 		mp_msg(MSGT_DEMUXER, MSGL_INFO, " SUB %s(pid=%d) ",
 			(param->stype==SPU_DVD ? "DVD" :
 			 param->stype==SPU_DVB ? "DVB" :
+			 param->stype==SPU_PGS ? "PGS" :
 			 param->stype==SPU_ISDB ? "ISDB" : "Teletext"),
 			param->spid);
 	else
@@ -1353,7 +1349,6 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 	params.spid = demuxer->sub->id;
 	params.prog = ts_prog;
 	params.probe = ts_probe;
-	params.scrambled = 0;
 
 	if(audio_lang != NULL)
 	{
@@ -1385,7 +1380,6 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 		ts_add_stream(demuxer, priv->ts.pids[params.vpid]);
 		sh_video = priv->ts.streams[params.vpid].sh;
 		demuxer->video->id = priv->ts.streams[params.vpid].id;
-		sh_video->ds = demuxer->video;
 		sh_video->format = params.vtype;
 		demuxer->video->sh = sh_video;
 	}
@@ -1402,7 +1396,6 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 		ts_add_stream(demuxer, priv->ts.pids[params.apid]);
 		sh_audio = priv->ts.streams[params.apid].sh;
 		demuxer->audio->id = priv->ts.streams[params.apid].id;
-		sh_audio->ds = demuxer->audio;
 		sh_audio->format = params.atype;
 		demuxer->audio->sh = sh_audio;
 		//change dmono mode if necessary
@@ -3530,6 +3523,9 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 			case 0x13:
 				pmt->es[idx].type = SL_SECTION;
 				break;
+			case 0x24:
+				pmt->es[idx].type = VIDEO_HEVC;
+				break;
 			case 0x80:
 				pmt->es[idx].type = AUDIO_PCM_BR;
 				break;
@@ -3773,8 +3769,12 @@ static int fill_packet(demuxer_t *demuxer, demux_stream_t *ds, demux_packet_t **
 	}
 	if(*dp)
 	{
+		double stream_pts = MP_NOPTS_VALUE;
 		ret = *dp_offset;
 		resize_demux_packet(*dp, ret);	//shrinked to the right size
+		if (ds == demuxer->video &&
+		    stream_control(demuxer->stream, STREAM_CTRL_GET_CURRENT_TIME, (void *)&stream_pts) != STREAM_UNSUPPORTED)
+			(*dp)->stream_pts = stream_pts;
 		ds_add_packet(ds, *dp);
 		mp_msg(MSGT_DEMUX, MSGL_DBG2, "ADDED %d  bytes to %s fifo, PTS=%.3f\n", ret, (ds == demuxer->audio ? "audio" : (ds == demuxer->video ? "video" : "sub")), (*dp)->pts);
 		if(si)
@@ -4019,12 +4019,13 @@ static int check_discon(demuxer_t *demuxer, double pcr)
 
 // 0 = EOF or no stream found
 // else = [-] number of bytes written to the packet
-static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet, int probe)
+static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, int probe)
 {
 	ES_stream_t *tss;
 	int buf_size, is_start, pid, base;
 	int len, cc, cc_ok, afc, retv = 0, is_video, is_audio, is_sub;
 	ts_priv_t * priv = (ts_priv_t*) demuxer->priv;
+	unsigned char *packet = priv->packet;
 	stream_t *stream = demuxer->stream;
 	char *p;
 	demux_stream_t *ds = NULL;
@@ -4678,9 +4679,8 @@ static void demux_seek_ts(demuxer_t *demuxer, float rel_seek_secs, float audio_d
 static int demux_ts_fill_buffer(demuxer_t * demuxer, demux_stream_t *ds)
 {
 	ES_stream_t es;
-	ts_priv_t *priv = (ts_priv_t *)demuxer->priv;
 
-	return -ts_parse(demuxer, &es, priv->packet, 0);
+	return -ts_parse(demuxer, &es, 0);
 }
 
 

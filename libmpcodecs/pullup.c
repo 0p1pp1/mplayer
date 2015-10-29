@@ -20,14 +20,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "libavutil/x86/asm.h"
+#include "mpx86asm.h"
 #include "config.h"
 #include "pullup.h"
 
 
 
 #if ARCH_X86
-#if HAVE_MMX
+#if HAVE_MMX_INLINE
 static int diff_y_mmx(unsigned char *a, unsigned char *b, int s)
 {
     int ret;
@@ -86,7 +86,7 @@ static int licomb_y_mmx(unsigned char *a, unsigned char *b, int s)
 
         "2: \n\t"
 
-        "movq (%%"REG_D"), %%mm0 \n\t"
+        "movq (%%"REG_S"), %%mm0 \n\t"
         "movq (%%"REG_D"), %%mm1 \n\t"
         "punpcklbw %%mm7, %%mm0 \n\t"
         "movq (%%"REG_D",%%"REG_a"), %%mm2 \n\t"
@@ -785,7 +785,7 @@ void pullup_init_context(struct pullup_context *c)
         c->comb = licomb_y;
         c->var = var_y;
 #if ARCH_X86
-#if HAVE_MMX
+#if HAVE_MMX_INLINE
         if (c->cpu & PULLUP_CPU_MMX) {
             c->diff = diff_y_mmx;
             c->comb = licomb_y_mmx;

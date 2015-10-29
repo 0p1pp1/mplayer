@@ -56,7 +56,6 @@
 #define HAVE_FREETYPE21
 #endif
 
-char *subtitle_font_encoding = NULL;
 float text_font_scale_factor = 3.5;
 float osd_font_scale_factor = 4.0;
 float subtitle_font_radius = 2.0;
@@ -795,6 +794,7 @@ static int prepare_charset(char *charmap, char *encoding, FT_ULong *charset, FT_
 
     return charset_size;
 }
+#endif
 
 static int prepare_charset_unicode(FT_Face face, FT_ULong *charset, FT_ULong *charcodes) {
 #ifdef HAVE_FREETYPE21
@@ -836,13 +836,10 @@ static int prepare_charset_unicode(FT_Face face, FT_ULong *charset, FT_ULong *ch
 
     return i;
 }
-#endif
 
 static font_desc_t* init_font_desc(void)
 {
-    font_desc_t *desc;
-
-    desc = calloc(1, sizeof(*desc));
+    font_desc_t *desc = calloc(1, sizeof(*desc));
     if(!desc) return NULL;
 
     desc->dynamic = 1;
@@ -950,9 +947,8 @@ font_desc_t* read_font_desc_ft(const char *fname, int face_index, int movie_widt
     FT_ULong *my_charset = malloc(MAX_CHARSET_SIZE * sizeof(FT_ULong)); /* characters we want to render; Unicode */
     FT_ULong *my_charcodes = malloc(MAX_CHARSET_SIZE * sizeof(FT_ULong)); /* character codes in 'encoding' */
 
-    char *charmap = "ucs-4";
     int err;
-    int charset_size;
+    int charset_size = -1;
     int i, j;
     int unicode;
 
@@ -990,12 +986,7 @@ font_desc_t* read_font_desc_ft(const char *fname, int face_index, int movie_widt
     if (subtitle_font_ppem > 128) subtitle_font_ppem = 128;
     if (osd_font_ppem > 128) osd_font_ppem = 128;
 
-    if ((subtitle_font_encoding == NULL)
-	|| (strcasecmp(subtitle_font_encoding, "unicode") == 0)) {
-	unicode = 1;
-    } else {
-	unicode = 0;
-    }
+    unicode = !subtitle_font_encoding || strcasecmp(subtitle_font_encoding, "unicode") == 0;
 
     desc = init_font_desc();
     if(!desc) goto err_out;
@@ -1010,24 +1001,17 @@ font_desc_t* read_font_desc_ft(const char *fname, int face_index, int movie_widt
     }
     desc->face_cnt++;
 
-#ifdef CONFIG_ICONV
-    if (unicode) {
+    if (unicode)
 	charset_size = prepare_charset_unicode(face, my_charset, my_charcodes);
-    } else {
-	if (subtitle_font_encoding) {
-	    charset_size = prepare_charset(charmap, subtitle_font_encoding, my_charset, my_charcodes);
-	} else {
-	    charset_size = prepare_charset(charmap, "iso-8859-1", my_charset, my_charcodes);
-	}
-    }
+#ifdef CONFIG_ICONV
+    else
+	charset_size = prepare_charset("ucs-4", subtitle_font_encoding, my_charset, my_charcodes);
+#endif
 
     if (charset_size < 0) {
 	mp_msg(MSGT_OSD, MSGL_ERR, MSGTR_LIBVO_FONT_LOAD_FT_SubFontCharsetFailed);
 	goto err_out;
     }
-#else
-    goto err_out;
-#endif
 
 //    fprintf(stderr, "fg: prepare t = %f\n", GetTimer()-t);
 

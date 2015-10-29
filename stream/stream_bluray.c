@@ -91,8 +91,14 @@ static int bluray_stream_seek(stream_t *s, int64_t pos)
     int64_t p;
 
     p = bd_seek(b->bd, pos);
-    if (p == -1)
+    // bd_seek does not say what happens on errors,
+    // so be extra paranoid.
+    // bd_seek also does not seek exactly to the requested
+    // position, so allow for some fuzz.
+    if (p < 0 || p > pos || p + 20*1024*1024 < pos) {
+        s->pos = bd_tell(b->bd);
         return 0;
+    }
 
     s->pos = p;
     return 1;
@@ -196,6 +202,35 @@ static int bluray_stream_control(stream_t *s, int cmd, void *arg)
         bd_free_title_info(ti);
 
         return r ? 1 : STREAM_UNSUPPORTED;
+    }
+
+    case STREAM_CTRL_GET_TIME_LENGTH: {
+        BLURAY_TITLE_INFO *ti = bd_get_title_info(b->bd, b->current_title, b->current_angle);
+        if (!ti)
+            return STREAM_UNSUPPORTED;
+        *(double *)arg = ti->duration / 90000.0;
+        return STREAM_OK;
+    }
+    case STREAM_CTRL_GET_SIZE:
+        *(uint64_t*)arg = bd_get_title_size(b->bd);
+        return STREAM_OK;
+
+    case STREAM_CTRL_GET_CURRENT_TIME:
+        *(double *)arg = bd_tell_time(b->bd) / 90000.0;
+        return STREAM_OK;
+    case STREAM_CTRL_SEEK_TO_TIME: {
+        int64_t res;
+        double target = *(double*)arg * 90000.0;
+        BLURAY_TITLE_INFO *ti = bd_get_title_info(b->bd, b->current_title, b->current_angle);
+        // clamp to ensure that out-of-bounds seeks do not simply do nothing.
+        target = FFMAX(target, 0);
+        if (ti && ti->duration > 1)
+            target = FFMIN(target, ti->duration - 1);
+        res = bd_seek_time(b->bd, target);
+        if (res < 0)
+            return STREAM_ERROR;
+        s->pos = res;
+        return 1;
     }
 
     case STREAM_CTRL_GET_NUM_ANGLES: {
@@ -326,6 +361,8 @@ static int bluray_stream_open(stream_t *s, int mode,
                "ID_BLURAY_TITLE_%d_ANGLE=%d\n", i + 1, ti->angle_count);
         mp_msg(MSGT_IDENTIFY, MSGL_V,
                "ID_BLURAY_TITLE_%d_LENGTH=%d.%03d\n", i + 1, sec, msec);
+        mp_msg(MSGT_IDENTIFY, MSGL_V,
+               "ID_BLURAY_TITLE_%d_PLAYLIST=%05d\n", i + 1, ti->playlist);
 
         /* try to guess which title may contain the main movie */
         if (ti->duration > max_duration) {

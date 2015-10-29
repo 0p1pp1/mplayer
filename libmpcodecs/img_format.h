@@ -20,6 +20,9 @@
 #define MPLAYER_IMG_FORMAT_H
 
 #include "config.h"
+#if CONFIG_VDPAU
+#include <vdpau/vdpau.h>
+#endif
 
 /* RGB/BGR Formats */
 
@@ -50,6 +53,8 @@
 #define IMGFMT_BGR16 (IMGFMT_BGR|16)
 #define IMGFMT_BGR24 (IMGFMT_BGR|24)
 #define IMGFMT_BGR32 (IMGFMT_BGR|32)
+#define IMGFMT_BGR48LE (IMGFMT_BGR|48)
+#define IMGFMT_BGR48BE (IMGFMT_BGR|48|128)
 
 #define IMGFMT_XYZ_MASK 0xFFFFFF00
 #define IMGFMT_XYZ (('X'<<24)|('Y'<<16)|('Z'<<8))
@@ -75,6 +80,7 @@
 #define IMGFMT_RGB15LE (IMGFMT_RGB15|128)
 #define IMGFMT_RGB16BE IMGFMT_RGB16
 #define IMGFMT_RGB16LE (IMGFMT_RGB16|128)
+#define IMGFMT_BGR48NE IMGFMT_BGR48BE
 #define IMGFMT_BGR12BE IMGFMT_BGR12
 #define IMGFMT_BGR12LE (IMGFMT_BGR12|128)
 #define IMGFMT_BGR15BE IMGFMT_BGR15
@@ -97,6 +103,7 @@
 #define IMGFMT_RGB15LE IMGFMT_RGB15
 #define IMGFMT_RGB16BE (IMGFMT_RGB16|128)
 #define IMGFMT_RGB16LE IMGFMT_RGB16
+#define IMGFMT_BGR48NE IMGFMT_BGR48LE
 #define IMGFMT_BGR12BE (IMGFMT_BGR12|128)
 #define IMGFMT_BGR12LE IMGFMT_BGR12
 #define IMGFMT_BGR15BE (IMGFMT_BGR15|128)
@@ -306,6 +313,7 @@ static inline int normalize_yuvp16(int fmt) {
 #define IMGFMT_VDPAU_WMV3          (IMGFMT_VDPAU|0x04)
 #define IMGFMT_VDPAU_VC1           (IMGFMT_VDPAU|0x05)
 #define IMGFMT_VDPAU_MPEG4         (IMGFMT_VDPAU|0x06)
+#define IMGFMT_VDPAU_HEVC          (IMGFMT_VDPAU|0x07)
 
 #define IMGFMT_IS_HWACCEL(fmt)     (IMGFMT_IS_VAAPI(fmt) || \
                                     IMGFMT_IS_VDPAU(fmt) || \
@@ -318,12 +326,14 @@ typedef struct {
     int timestamp; // pts, 90000 Hz counter based
 } vo_mpegpes_t;
 
+#if CONFIG_VDPAU
 struct vdpau_frame_data {
-    struct vdpau_render_state *render_state;
+    VdpVideoSurface surface;
     const void *info;
     unsigned bitstream_buffers_used;
     const void *bitstream_buffers;
 };
+#endif
 
 const char *vo_format_name(int format);
 

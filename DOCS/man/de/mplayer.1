@@ -1,4 +1,4 @@
-.\" MPlayer (C) 2000-2013 MPlayer Team
+.\" MPlayer (C) 2000-2015 MPlayer Team
 .\" Diese Man-Page wurde/wird von Moritz Bunkus, Sebastian Krämer,
 .\" Tobias Diedrich gepflegt.
 .\"
@@ -33,7 +33,7 @@
 .\" Titel
 .\" --------------------------------------------------------------------------
 .
-.TH MPlayer 1 "03.03.2012" "Das MPlayer Projekt"
+.TH MPlayer 1 "13.02.2015" "Das MPlayer Projekt"
 .
 .SH NAME
 mplayer  \- Movie Player
@@ -619,6 +619,7 @@ equ_channel_1 ... equ_channel_6
 gui_main_pos_x,
 gui_main_pos_y,
 gui_save_pos (ja/nein),
+gui_tv_digital (ja/nein),
 gui_video_out_pos_x,
 gui_video_out_pos_y,
 load_fullscreen  (ja/nein),
@@ -653,7 +654,7 @@ font_autoscale
 font_blur
 .RB ( subfont-blur ") (nur mit FreeType),"
 font_encoding
-.RB ( subfont-encoding ") (nur mit FreeType),"
+.RB ( subfont-encoding ),
 font_factor
 .RB ( ffactor ),
 font_name
@@ -666,6 +667,8 @@ font_text_scale
 .RB ( subfont-text-scale ") (nur mit FreeType),"
 gui_skin
 .RB ( skin ),
+idle
+.RB ( idle ),
 osd_level
 .RB ( osdlevel ),
 softvol
@@ -682,6 +685,8 @@ sub_pos
 .RB ( subpos ),
 sub_unicode
 .RB ( unicode ),
+sub_utf8
+.RB ( utf8 ),
 v_flip
 .RB ( flip ),
 v_framedrop
@@ -2266,7 +2271,7 @@ zusammen mit immediatemode=0 zu ruckelndem Video führt.
 .TP
 .B \-tvscan <Option1:Option2:...> (nur bei TV und MPlayer)
 Mache Einstellungen für den TV-Kanal-Scanner.
-MPlayer wird auch Werte für die Option "-tv channels=" ausgeben,
+MPlayer wird auch Werte für die Option "\-tv channels=" ausgeben,
 inklusive der existierenden und der gerade gefundenen Kanäle.
 .sp 1
 Verfügbare Unteroptionen sind:
@@ -2318,8 +2323,8 @@ Matroska-Spuren verwendet.
 Du möchtest vielleicht auch \-embeddedfonts verwenden.
 .br
 .I ANMERKUNG:
-Wenn fontconfig eincompiliert wurde, schaltet \-ass automatisch \-fontconfig
-ein, wenn dies nicht mit \-nofontconfig anders angegeben wurde.
+Im Gegensatz zum normalen OSD verwendet libass fontconfig automatisch. Um
+dies auszuschalten, verwende \-nofontconfig.
 .
 .TP
 .B \-ass\-border\-color <Wert>
@@ -2482,14 +2487,15 @@ Untertiteln.
 Benutze dies, falls Kommata in Untertiteln am Anfang eines Satzes anstatt am
 Ende angezeigt werden.
 .TP
-.B \-font <Pfad zur font.desc-Datei>
+.B \-font <Pfad zur font.desc-Datei, Pfad zur Schriftdatei (FreeType), Schriftmuster (Fontconfig)>
 Sucht nach den OSD-/\:Untertitelschriften in einem anderen Verzeichnis
 (Standard für normale Schriften: ~/\:.mplayer/\:font/\:font.desc,
-Standard für FreeType-Schriften: ~/.mplayer/\:subfont.ttf).
+Standard für FreeType-Schriften: ~/.mplayer/\:subfont.ttf,
+Standard für Fontconfig: "sans-serif").
 .br
 .I ANMERKUNG:
-Bei FreeType gibt diese Option den Pfad zur Textschriftdatei an.
-Bei fontconfig gibt diese Option den fontconfig-Schriftnamen an.
+Bei FreeType gibt diese Option den Pfad zur Schriftdatei an.
+Bei Fontconfig gibt diese Option das Fontconfig-Schriftmuster an.
 .sp 1
 .I BEISPIEL:
 .PD 0
@@ -2499,16 +2505,22 @@ Bei fontconfig gibt diese Option den fontconfig-Schriftnamen an.
 \-font ~/\:.mplayer/\:arialuni.ttf
 .br
 \-font 'Bitstream Vera Sans'
+.br
+\-font 'Bitstream Vera Sans:style=Bold'
 .RE
 .PD 1
 .
 .TP
 .B \-fontconfig (nur bei fontconfig)
-Ermöglicht die Benutzung von Schriften, die von fontconfig verwaltet werden.
+Ermöglicht die Benutzung von Schriften, die von fontconfig verwaltet werden
+(Standard: automatische Erkennung).
 .br
 .I ANMERKUNG:
-\-ass schaltet dies automatisch ein, wenn dies nicht explizit mit
-\-nofontconfig überschrieben wird.
+Für durch libass gerenderte Untertitel wird fontconfig automatisch
+verwendet, nicht jedoch für das OSD. Mit \-fontconfig wird es sowohl für
+libass als auch das OSD verwendet, mit \-nofontconfig dagegen überhaupt
+nicht, d. h. nur dann funktionieren \-font und \-subfont mit einem
+angegebenen Dateinamen.
 .
 .TP
 .B \-forcedsubsonly
@@ -2728,7 +2740,8 @@ CC-Untertitel wurden bisher auf keinen DVDs für andere Regionen entdeckt.
 .TP
 .B \-subcp <Codepage> (nur bei iconv)
 Wenn dein System iconv(3) unterstützt, kannst du mit dieser Option
-die Codepage für die Untertitel angeben.
+die Codepage für die Untertitel angeben. Sie hat Vorrang sowohl vor \-utf8
+wie auch vor \-unicode.
 .sp 1
 .I BEISPIEL:
 .PD 0
@@ -2770,7 +2783,7 @@ Zur Zeit unbrauchbar.
 Das gleiche wie \-audiofile, jedoch für Untertitel-Streams (OggDS?).
 .
 .TP
-.B \-subfont <Dateiname> (nur bei FreeType)
+.B \-subfont <Pfad zur Schriftdatei (FreeType), Schriftmuster (Fontconfig)> (nur bei FreeType)
 Setzt die Schriftart für Untertitel.
 Wenn kein \-subfont gegeben ist, wird \-font verwendet.
 .
@@ -2801,10 +2814,13 @@ proportional zur Diagonale des Films (Standard)
 Setzt den Verwischradius für die Schriften (Standard: 2).
 .
 .TP
-.B \-subfont\-encoding <Wert> (nur bei FreeType)
+.B \-subfont\-encoding <Wert>
 Setzt die Schriftcodierung.
-Wenn 'unicode' angegeben wird, so werden alle Zeichen der Schriftdatei
-gerendert, und unicode wird benutzt werden (Standard: unicode).
+Wenn 'unicode' angegeben wird, werden alle Zeichen der Schriftdatei
+gerendert und Unicode wird benutzt werden (Standard: unicode). (Ohne FreeType
+bewirkt jeder andere Wert, dass keine Unicode-Zeichen aus font.desc\-Dateien
+gerendert werden. Mit FreeType und für andere Werte als 'unicode' muss dein
+System iconv(3) unterstützen, um zu funktionieren.)
 .
 .TP
 .B \-subfont\-osd\-scale <0\-100> (nur bei FreeType)
@@ -2853,7 +2869,8 @@ bewegen und die Zeile löschen (Standard: ^[[A\\r^[[K).
 .
 .TP
 .B \-unicode
-Weist MPlayer an, die Untertiteldatei als Unicode zu behandeln.
+Weist MPlayer an, die Untertiteldatei als Unicode zu behandeln. (Diese Option
+ist nur wirksam, wenn weder \-subcp noch \-utf8 verwendet werden.)
 .
 .TP
 .B \-unrarexec <Pfad zum unrar-Programm> (unter MingW nicht unterstützt)
@@ -2865,7 +2882,9 @@ Der Pfad muss den Dateinamen des Programms beinhalten, z.B.\&
 .
 .TP
 .B "\-utf8 \ \ "
-Weist MPlayer an, die Untertiteldatei als UTF-8 zu behandeln.
+Weist MPlayer an, die Untertiteldatei als UTF-8 zu behandeln. (Diese Option
+ist nur wirksam, wenn \-subcp nicht verwendet wird, und sie hat Vorrang vor
+\-unicode.)
 .
 .TP
 .B \-vobsub <VOBsub-Datei ohne Erweiterung>
@@ -2937,7 +2956,7 @@ Gesamtweite (Standard: 3).
 .B \-volume <-1\-100> (siehe auch \-af volume)
 Setze die Lautstärke im Mixer zum Programmstart, entweder in Hardware oder
 Software (in Verbindung mit \-softvol).
-Ein Wert von -1 (Standard) ändert die Lautstärke nicht.
+Ein Wert von \-1 (Standard) ändert die Lautstärke nicht.
 .
 .
 .
@@ -7669,14 +7688,17 @@ Die Option fd weist den Filter an, die geforderte Skalierung immer auszuführen
 .RE
 .
 .TP
-.B screenshot
+.B screenshot=Präfix
 Erlaubt das Erstellen von Schnappschüssen des Videos mit Hilfe
 von Slave-Kommandos, die an Tasten gebunden werden können.
 Siehe Dokumentation des Slave-Modus und den Abschnitt INTERAKTIVE STEUERUNG
 für Details.
-Es werden Dateien mit dem Namen 'shotNNNN.png' im aktuellen Verzeichnis
+Standardmäßig werden Dateien mit dem Namen 'shotNNNN.png' im aktuellen Verzeichnis
 abgelegt, NNNN entspricht hierbei der ersten verfügbaren Nummer \- keine Datei
 wird überschrieben.
+Durch Angabe eines Präfixes lassen sich Name und Verzeichnis ändern, so
+werden z. B. mit \-vf screenshot=shots/now Dateien mit Namen nowNNNN.png im
+Verzeichnis shots abgelegt.
 Der Filter führt zu keiner Mehrbelastung, solange er nicht benutzt wird und
 akzeptiert beliebige Farbräume, es ist also ungefährlich ihn in die
 Konfigurationsdatei mit aufzunehmen.
@@ -10707,7 +10729,7 @@ höhere Werte forcieren sanftere Schwankungen.
 .TP
 .B zones=<Zone0>[/<Zone1>[/...]]
 Vom Benutzer festgelegte Qualität für besondere Abschnitte (Ende, Abspann,
-...).
+\&...).
 Jede Zone ist <Start-Frame>,<End-Frame>,<Option>, wobei Option die folgenden
 Werte annehmen kann:
 .PD 0
@@ -11979,7 +12001,7 @@ erstellt.
 MPlayer wurde ursprünglich von Arpad Gereöffy geschrieben.
 Siehe Datei AUTHORS für eine Liste einiger der vielen anderen Beitragenden.
 .PP
-MPlayer is (C) 2000\-2013 The MPlayer Team
+MPlayer is (C) 2000\-2015 The MPlayer Team
 .PP
 Diese Manpage wurde zum größten Teil von Gabucino, Diego Biurrun und
 Jonas Jermann geschrieben und von Moritz Bunkus und Sebastian Krämer

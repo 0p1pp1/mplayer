@@ -36,6 +36,7 @@
 #include "mp_global.h"
 #include "stream/url.h"
 #include "libavutil/avstring.h"
+#include "libavutil/attributes.h"
 
 // Don't free for 'production' atm
 #ifndef MP_DEBUG
@@ -155,10 +156,9 @@ const m_option_type_t m_option_type_flag = {
 
 // Integer
 
-static int parse_int(const m_option_t* opt,const char *name, const char *param, void* dst, int src) {
+static int parse_int(const m_option_t* opt,const char *name, const char *param, void* dst, int av_unused src) {
   long long tmp_int;
   char *endptr;
-  src = 0;
 
   if (param == NULL)
     return M_OPT_MISSING_PARAM;
@@ -228,10 +228,9 @@ const m_option_type_t m_option_type_int64 = {
 #undef VAL
 #define VAL(x) (*(double*)(x))
 
-static int parse_double(const m_option_t* opt,const char *name, const char *param, void* dst, int src) {
+static int parse_double(const m_option_t* opt,const char *name, const char *param, void* dst, int av_unused src) {
   double tmp_float;
   char* endptr;
-  src = 0;
 
   if (param == NULL)
     return M_OPT_MISSING_PARAM;
@@ -277,8 +276,7 @@ static int parse_double(const m_option_t* opt,const char *name, const char *para
   return 1;
 }
 
-static char* print_double(const m_option_t* opt,  const void* val) {
-  opt = NULL;
+static char* print_double(const m_option_t* av_unused opt,  const void* val) {
   return dup_printf("%f",VAL(val));
 }
 
@@ -305,8 +303,7 @@ static int parse_float(const m_option_t* opt,const char *name, const char *param
     return r;
 }
 
-static char* print_float(const m_option_t* opt,  const void* val) {
-  opt = NULL;
+static char* print_float(const m_option_t* av_unused opt,  const void* val) {
   return dup_printf("%f",VAL(val));
 }
 
@@ -980,14 +977,12 @@ static int parse_subconf(const m_option_t* opt,const char *name, const char *par
 
   while(p[0])
     {
-      int sscanf_ret = 1;
       int optlen = strcspn(p, ":=");
       /* clear out */
       subopt[0] = subparam[0] = 0;
       av_strlcpy(subopt, p, optlen + 1);
       p = &p[optlen];
       if (p[0] == '=') {
-        sscanf_ret = 2;
         p = &p[1];
         if (p[0] == '"') {
           p = &p[1];
@@ -1025,31 +1020,24 @@ static int parse_subconf(const m_option_t* opt,const char *name, const char *par
         goto out;
       }
 
-      switch(sscanf_ret)
-	{
-	case 1:
-	  subparam[0] = 0;
-	case 2:
-	  for(i = 0 ; subopts[i].name ; i++) {
-	    if(!strcmp(subopts[i].name,subopt)) break;
-	  }
-	  if(!subopts[i].name) {
-	    mp_msg(MSGT_CFGPARSER, MSGL_ERR, "Option %s: Unknown suboption %s\n",name,subopt);
-	    r = M_OPT_UNKNOWN;
-	    goto out;
-	  }
-	  r = m_option_parse(&subopts[i],subopt,
-			     subparam[0] == 0 ? NULL : subparam,NULL,src);
-	  if(r < 0) goto out;
-	  if(dst) {
-	    lst = realloc(lst,2 * (nr+2) * sizeof(char*));
-	    lst[2*nr] = strdup(subopt);
-	    lst[2*nr+1] = subparam[0] == 0 ? NULL : strdup(subparam);
-	    memset(&lst[2*(nr+1)],0,2*sizeof(char*));
-	    nr++;
-	  }
-	  break;
-	}
+      for(i = 0 ; subopts[i].name ; i++) {
+        if(!strcmp(subopts[i].name,subopt)) break;
+      }
+      if(!subopts[i].name) {
+        mp_msg(MSGT_CFGPARSER, MSGL_ERR, "Option %s: Unknown suboption %s\n",name,subopt);
+        r = M_OPT_UNKNOWN;
+        goto out;
+      }
+      r = m_option_parse(&subopts[i],subopt,
+                         subparam[0] == 0 ? NULL : subparam,NULL,src);
+      if(r < 0) goto out;
+      if(dst) {
+        lst = realloc(lst,2 * (nr+2) * sizeof(char*));
+        lst[2*nr] = strdup(subopt);
+        lst[2*nr+1] = subparam[0] == 0 ? NULL : strdup(subparam);
+        memset(&lst[2*(nr+1)],0,2*sizeof(char*));
+        nr++;
+      }
     }
 
   if(dst)
@@ -1139,6 +1127,8 @@ static struct {
   {"y16le", IMGFMT_Y16_LE},
   {"nv12", IMGFMT_NV12},
   {"nv21", IMGFMT_NV21},
+  {"bgr48le", IMGFMT_BGR48LE},
+  {"bgr48be", IMGFMT_BGR48BE},
   {"bgr24", IMGFMT_BGR24},
   {"bgr32", IMGFMT_BGR32},
   {"bgr16", IMGFMT_BGR16},
@@ -1974,9 +1964,9 @@ const m_option_type_t m_option_type_obj_settings_list = {
 static int parse_obj_presets(const m_option_t* opt,const char *name,
 			    const char *param, void* dst, int src) {
   m_obj_presets_t* obj_p = (m_obj_presets_t*)opt->priv;
-  m_struct_t *in_desc,*out_desc;
+  const m_struct_t *in_desc,*out_desc;
   int s,i;
-  unsigned char* pre;
+  const unsigned char* pre;
   char* pre_name = NULL;
 
   if(!obj_p) {

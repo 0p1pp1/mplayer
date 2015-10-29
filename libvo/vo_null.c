@@ -28,6 +28,7 @@
 #include "mp_msg.h"
 #include "help_mp.h"
 #include "video_out.h"
+#define NO_DRAW_FRAME
 #include "video_out_internal.h"
 
 static const vo_info_t info =
@@ -59,17 +60,11 @@ flip_page(void)
 }
 
 static int
-draw_frame(uint8_t *src[])
-{
-	return 0;
-}
-
-static int
 query_format(uint32_t format)
 {
     if (IMGFMT_IS_HWACCEL(format))
         return 0;
-    return VFCAP_CSP_SUPPORTED;
+    return VFCAP_CSP_SUPPORTED | VFCAP_ACCEPT_STRIDE;
 }
 
 static int

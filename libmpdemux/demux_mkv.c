@@ -788,7 +788,7 @@ static int demux_mkv_read_trackentry(demuxer_t *demuxer)
         {
             uint64_t num = ebml_read_uint(s, &l);
             if (num == EBML_UINT_INVALID)
-                return 0;
+                goto err_out;
             track->type = num;
             mp_msg(MSGT_DEMUX, MSGL_V, "[mkv] |  + Track type: ");
             switch (track->type) {
@@ -1232,17 +1232,25 @@ static int demux_mkv_read_attachments(demuxer_t *demuxer)
 
                 switch (ebml_read_id(s, &il)) {
                 case MATROSKA_ID_FILENAME:
+                    free(name);
                     name = ebml_read_utf8(s, &l);
-                    if (name == NULL)
+                    if (name == NULL) {
+                        free(mime);
+                        free(data);
                         return 0;
+                    }
                     mp_msg(MSGT_DEMUX, MSGL_V, "[mkv] |  + FileName: %s\n",
                            name);
                     break;
 
                 case MATROSKA_ID_FILEMIMETYPE:
+                    free(mime);
                     mime = ebml_read_ascii(s, &l);
-                    if (mime == NULL)
+                    if (mime == NULL) {
+                        free(name);
+                        free(data);
                         return 0;
+                    }
                     mp_msg(MSGT_DEMUX, MSGL_V,
                            "[mkv] |  + FileMimeType: %s\n", mime);
                     break;
@@ -1253,10 +1261,15 @@ static int demux_mkv_read_attachments(demuxer_t *demuxer)
                     uint64_t num = ebml_read_length(s, &x);
                     l = x + num;
                     free(data);
-                    if (num > SIZE_MAX)
+                    if (num > SIZE_MAX) {
+                        free(name);
+                        free(mime);
                         return 0;
+                    }
                     data = malloc(num);
-                    if (stream_read(s, data, num) != (int) num) {
+                    if (!data || stream_read(s, data, num) != (int) num) {
+                        free(name);
+                        free(mime);
                         free(data);
                         return 0;
                     }
@@ -1274,10 +1287,13 @@ static int demux_mkv_read_attachments(demuxer_t *demuxer)
                 len -= l + il;
             }
 
-            demuxer_add_attachment(demuxer, name, mime, data, data_size);
+            demuxer_add_attachment(demuxer, name, mime ? mime : "application/octet-stream", data, data_size);
             mp_msg(MSGT_DEMUX, MSGL_V,
                    "[mkv] Attachment: %s, %s, %u bytes\n", name, mime,
                    data_size);
+            free(name);
+            free(mime);
+            free(data);
             break;
         }
 
@@ -1477,6 +1493,7 @@ typedef struct {
 } videocodec_info_t;
 
 static const videocodec_info_t vinfo[] = {
+    {MKV_V_HEVC,      mmioFOURCC('h', 'e', 'v', '1'), 1},
     {MKV_V_MPEG1,     mmioFOURCC('m', 'p', 'g', '1'), 0},
     {MKV_V_MPEG2,     mmioFOURCC('m', 'p', 'g', '2'), 0},
     {MKV_V_MPEG4_SP,  mmioFOURCC('m', 'p', '4', 'v'), 1},
@@ -1485,6 +1502,7 @@ static const videocodec_info_t vinfo[] = {
     {MKV_V_MPEG4_AVC, mmioFOURCC('a', 'v', 'c', '1'), 1},
     {MKV_V_THEORA,    mmioFOURCC('t', 'h', 'e', 'o'), 1},
     {MKV_V_VP8,       mmioFOURCC('V', 'P', '8', '0'), 0},
+    {MKV_V_VP9,       mmioFOURCC('V', 'P', '9', '0'), 0},
     {NULL, 0, 0}
 };
 
@@ -1636,7 +1654,6 @@ static int demux_mkv_open_video(demuxer_t *demuxer, mkv_track_t *track,
     sh_v->ImageDesc = ImageDesc;
     mp_msg(MSGT_DEMUX, MSGL_V, "[mkv] Aspect: %f\n", sh_v->aspect);
 
-    sh_v->ds = demuxer->video;
     return 0;
 }
 
@@ -1652,7 +1669,6 @@ static int demux_mkv_open_audio(demuxer_t *demuxer, mkv_track_t *track,
     mkv_d->audio_tracks[mkv_d->last_aid] = track->tnum;
 
     sh_a->default_track = track->default_track;
-    sh_a->ds = demuxer->audio;
     sh_a->wf = malloc(sizeof(*sh_a->wf));
     if (track->ms_compat && (track->private_size >= sizeof(*sh_a->wf))) {
         WAVEFORMATEX *wf = (WAVEFORMATEX *) track->private_data;
@@ -2079,6 +2095,7 @@ static int demux_mkv_open(demuxer_t *demuxer)
 
         default:
             cont = 1;
+            /* Fallthrough to skip data */
         case EBML_ID_VOID:
             ebml_read_skip(s, NULL);
             break;

@@ -41,7 +41,6 @@
 #include "fastmemcpy.h"
 
 #include "video_out.h"
-#include "video_out_internal.h"
 #include "libmpcodecs/vf.h"
 #include "aspect.h"
 #include "sub/spuenc.h"
@@ -53,6 +52,9 @@
 #include "x11_common.h"
 #endif
 #include "libavutil/avstring.h"
+
+#define NO_DRAW_SLICE
+#include "video_out_internal.h"
 
 #define SPU_SUPPORT
 
@@ -180,12 +182,7 @@ static int control(uint32_t request, void *data)
 {
 	switch (request) {
 	case VOCTRL_GUISUPPORT:
-		return VO_TRUE;
-	case VOCTRL_GUI_NOWINDOW:
-		if (dxr3_overlay) {
-			return VO_FALSE;
-		}
-		return VO_TRUE;
+		return dxr3_overlay ? VO_TRUE : VO_FALSE;
 	case VOCTRL_SET_SPU_PALETTE:
 		if (ioctl(fd_spu, EM8300_IOCTL_SPU_SETPALETTE, data) < 0) {
 			mp_msg(MSGT_VO,MSGL_ERR, MSGTR_LIBVO_DXR3_UnableToLoadNewSPUPalette);
@@ -673,11 +670,6 @@ static void flip_page(void)
 		ioctl(fd_spu, EM8300_IOCTL_SPU_SETPTS, &vo_pts);
 		ioctl(fd_video, EM8300_IOCTL_VIDEO_SETPTS, &vo_pts);
 	}
-}
-
-static int draw_slice(uint8_t *srcimg[], int stride[], int w, int h, int x0, int y0)
-{
-	return -1;
 }
 
 static void uninit(void)

@@ -219,23 +219,19 @@ static stream_t* open_stream_plugin(const stream_info_t* sinfo, const char* file
 
 
 stream_t* open_stream_full(const char* filename,int mode, char** options, int* file_format) {
-  int i,j,l,r;
-  const stream_info_t* sinfo;
-  stream_t* s;
-  char *redirected_url = NULL;
+  int i,j;
 
   for(i = 0 ; auto_open_streams[i] ; i++) {
-    sinfo = auto_open_streams[i];
-    if(!sinfo->protocols) {
-      mp_msg(MSGT_OPEN,MSGL_WARN, MSGTR_StreamProtocolNULL, sinfo->name);
-      continue;
-    }
+    const stream_info_t *sinfo = auto_open_streams[i];
     for(j = 0 ; sinfo->protocols[j] ; j++) {
-      l = strlen(sinfo->protocols[j]);
+      int l = strlen(sinfo->protocols[j]);
       // l == 0 => Don't do protocol matching (ie network and filenames)
       if((l == 0 && !strstr(filename, "://")) ||
          ((strncasecmp(sinfo->protocols[j],filename,l) == 0) &&
 		      (strncmp("://",filename+l,3) == 0))) {
+	int r;
+	char *redirected_url = NULL;
+	stream_t* s;
 	*file_format = DEMUXER_TYPE_UNKNOWN;
 	s = open_stream_plugin(sinfo,filename,mode,options,file_format,&r,
 				&redirected_url);
@@ -363,10 +359,20 @@ int stream_fill_buffer(stream_t *s){
     return 0;
   s->buf_pos=0;
   s->buf_len=len;
+  while (s->buf_len < STREAM_BUFFER_MIN) {
+    assert(s->buf_len + STREAM_BUFFER_MIN < STREAM_BUFFER_SIZE);
+    len = stream_read_internal(s, s->buffer + s->buf_len, STREAM_BUFFER_MIN);
+    if (len <= 0)
+      break;
+    s->buf_len += len;
+  }
+  // since the first read succeeded we are
+  // definitely not at EOF yet
+  s->eof = 0;
 //  printf("[%d]",len);fflush(stdout);
   if (s->capture_file)
     stream_capture_do(s);
-  return len;
+  return s->buf_len;
 }
 
 int stream_write_buffer(stream_t *s, unsigned char *buf, int len) {
@@ -479,7 +485,6 @@ while(stream_fill_buffer(s) > 0 && pos >= 0) {
 
 void stream_reset(stream_t *s){
   if(s->eof){
-    s->pos=0;
     s->buf_pos=s->buf_len=0;
     s->eof=0;
   }
