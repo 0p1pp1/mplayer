@@ -565,7 +565,7 @@ static void draw_slice(struct AVCodecContext *s,
     sh_video_t *sh = s->opaque;
     vd_ffmpeg_ctx *ctx = sh->context;
     uint8_t *source[MP_MAX_PLANES]= {src->data[0] + offset[0], src->data[1] + offset[1], src->data[2] + offset[2], src->data[3] + offset[3]};
-    int strides[MP_MAX_PLANES] = {src->linesize[0], src->linesize[1], src->linesize[2]};
+    int strides[MP_MAX_PLANES] = {src->linesize[0], src->linesize[1], src->linesize[2], src->linesize[3]};
     if (!src->data[0]) {
         mp_msg(MSGT_DECVIDEO, MSGL_FATAL, "BUG in FFmpeg, draw_slice called with NULL pointer!\n");
         return;
@@ -1030,6 +1030,7 @@ static mp_image_t *decode(sh_video_t *sh, void *data, int len, int flags){
 //--
 
     if(!got_picture) {
+        // av_frame_unref(pic);
         if (avctx->codec->id == AV_CODEC_ID_H264 &&
 	    skip_frame <= AVDISCARD_DEFAULT)
 	    return &mpi_no_picture; // H.264 first field only

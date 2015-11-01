@@ -25,6 +25,7 @@
 #include "help_mp.h"
 #include "subopt-helper.h"
 #include "video_out.h"
+#define NO_DRAW_FRAME
 #include "video_out_internal.h"
 #include "fastmemcpy.h"
 #include "sub/sub.h"
@@ -2399,11 +2400,6 @@ static int draw_slice(uint8_t * image[], int stride[],
         return VO_FALSE;
 
     return VO_TRUE;
-}
-
-static int draw_frame(mp_unused uint8_t * src[])
-{
-    return -1;
 }
 
 static void draw_osd(void)
