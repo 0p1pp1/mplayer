@@ -625,8 +625,8 @@ static void update_configuration(sh_video_t *sh, enum AVPixelFormat pix_fmt, int
             // _sample_ aspect is unchanged.
             if (sh->original_aspect == 0 || (aspect_change && ctx->last_sample_aspect_ratio.den))
                 sh->original_aspect = aspect;
-            ctx->last_sample_aspect_ratio = avctx->sample_aspect_ratio;
         }
+        ctx->last_sample_aspect_ratio = avctx->sample_aspect_ratio;
         ctx->pix_fmt = pix_fmt;
         ctx->best_csp = pixfmt2imgfmt2(pix_fmt, avctx->codec_id);
     }
