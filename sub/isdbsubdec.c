@@ -572,7 +572,7 @@ static void do_output(ISDBSubContext *ctx, uint8_t **outbufp, int *osize)
     }
     if (!ctx->is_style_inited) { // once
 #define STYLE_PARAMS_FONT \
-    ":lang=ja:spacing=dual:spacing=mono:spacing=charcell"
+    ":lang=ja:charset=3000:spacing=dual"
 #define STYLE_PARAMS_COMMON \
     "&H00FFFFFF, &HFF000000, &HFF000000, &HFF000000, 1, 0, 0, 1\n"
 
