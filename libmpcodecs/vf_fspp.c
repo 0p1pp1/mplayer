@@ -48,7 +48,6 @@
 #include "av_helpers.h"
 #include "libvo/fastmemcpy.h"
 
-#include "libavutil/internal.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/mem.h"
 #include "mpx86asm.h"

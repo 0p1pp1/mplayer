@@ -55,7 +55,6 @@ Known Issues:
 #include "cpudetect.h"
 
 #include "libavutil/common.h"
-#include "libavutil/internal.h"
 #include "libavutil/intreadwrite.h"
 #include "libavcodec/avcodec.h"
 
